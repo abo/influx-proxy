@@ -8,7 +8,7 @@ import (
 	"errors"
 	"log"
 
-	"github.com/chengshiwen/influx-proxy/util"
+	"github.com/abo/influx-proxy/util"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/spf13/viper"
 )

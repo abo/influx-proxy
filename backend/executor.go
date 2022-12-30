@@ -11,9 +11,10 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"sort"
 	"sync"
 
-	"github.com/chengshiwen/influx-proxy/util"
+	"github.com/abo/influx-proxy/util"
 	"github.com/influxdata/influxdb1-client/models"
 )
 
@@ -25,72 +26,61 @@ var (
 	ErrGetBackends         = errors.New("can't get backends")
 )
 
-func query(w http.ResponseWriter, req *http.Request, ip *Proxy, key string, fn func(*Backend, *http.Request, http.ResponseWriter) ([]byte, error)) (body []byte, err error) {
-	// pass non-active, rewriting or write-only.
-	perms := rand.Perm(len(ip.Circles))
-	for _, p := range perms {
-		be := ip.Circles[p].GetBackend(key)
-		if !be.IsActive() || be.IsRewriting() || be.IsWriteOnly() {
+// 选择 active 的节点执行 query, 返回第一个成功的结果. 优先选择 non-writing 的节点上执行, 当满足条件的节点有多个时, 尽量均衡其负载
+func execQuery(w http.ResponseWriter, r *http.Request, nodes []*Backend, queryFn func(*Backend, *http.Request, http.ResponseWriter) ([]byte, error)) (body []byte, err error) {
+	// 优先在无写入的节点上执行，多个时随机
+	randSeq := rand.Perm(len(nodes))
+	sort.Slice(randSeq, func(i, j int) bool {
+		less := !nodes[randSeq[i]].IsWriting() && nodes[randSeq[j]].IsWriting()
+		return less
+	})
+
+	for _, idx := range randSeq {
+		b := nodes[idx]
+		if !b.IsActive() {
 			continue
-		}
-		body, err = fn(be, req, w)
-		if err == nil {
+		} else if body, err = queryFn(b, r, w); err == nil {
 			return
 		}
 	}
 
-	// pass non-active, non-writing (excluding rewriting and write-only).
-	backends := ip.GetBackends(key)
-	for _, be := range backends {
-		if !be.IsActive() || !(be.IsRewriting() || be.IsWriteOnly()) {
-			continue
-		}
-		body, err = fn(be, req, w)
-		if err == nil {
-			return
-		}
+	if err == nil {
+		err = ErrBackendsUnavailable
 	}
-
-	if err != nil {
-		return
-	}
-	return nil, ErrBackendsUnavailable
+	return
 }
 
-func ReadProm(w http.ResponseWriter, req *http.Request, ip *Proxy, db, meas string) (err error) {
+func ReadProm(w http.ResponseWriter, req *http.Request, ip *Proxy, db, measurement string) (err error) {
 	// all circles -> backend by key(db,meas) -> select or show
-	key := GetKey(db, meas)
 	fn := func(be *Backend, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		err = be.ReadProm(req, w)
 		return nil, err
 	}
-	_, err = query(w, req, ip, key, fn)
+	_, err = execQuery(w, req, ip.GetShards(db, measurement), fn)
 	return
 }
 
-func QueryFlux(w http.ResponseWriter, req *http.Request, ip *Proxy, bucket, meas string) (err error) {
+func QueryFlux(w http.ResponseWriter, req *http.Request, ip *Proxy, bucket, measurement string) (err error) {
 	// all circles -> backend by key(org,bucket,meas) -> query flux
-	key := GetKey(bucket, meas)
 	fn := func(be *Backend, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		err = be.QueryFlux(req, w)
 		return nil, err
 	}
-	_, err = query(w, req, ip, key, fn)
+	_, err = execQuery(w, req, ip.GetShards(bucket, measurement), fn)
 	return
 }
 
 func QueryFromQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []string, db string) (body []byte, err error) {
 	// all circles -> backend by key(db,meas) -> select or show
-	meas, err := GetMeasurementFromTokens(tokens)
+	measurement, err := GetMeasurementFromTokens(tokens)
 	if err != nil {
 		return nil, ErrGetMeasurement
 	}
-	key := GetKey(db, meas)
 	fn := func(be *Backend, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		qr := be.Query(req, w, false)
 		return qr.Body, qr.Err
 	}
-	body, err = query(w, req, ip, key, fn)
+	body, err = execQuery(w, req, ip.GetShards(db, measurement), fn)
 	return
 }
 
@@ -144,12 +134,11 @@ func QueryShowQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []s
 
 func QueryDeleteOrDropQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []string, db string) (body []byte, err error) {
 	// all circles -> backend by key(db,meas) -> delete or drop measurement/series
-	meas, err := GetMeasurementFromTokens(tokens)
+	measurement, err := GetMeasurementFromTokens(tokens)
 	if err != nil {
 		return nil, err
 	}
-	key := GetKey(db, meas)
-	backends := ip.GetBackends(key)
+	backends := ip.GetShards(db, measurement)
 	return QueryBackends(backends, req, w)
 }
 

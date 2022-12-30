@@ -2,7 +2,7 @@
 
 PROGRAM     := influx-proxy
 VERSION     := 2.5.10
-LDFLAGS     ?= "-s -w -X github.com/chengshiwen/influx-proxy/backend.Version=$(VERSION) -X github.com/chengshiwen/influx-proxy/backend.GitCommit=$(shell git rev-parse --short HEAD) -X 'github.com/chengshiwen/influx-proxy/backend.BuildTime=$(shell date '+%Y-%m-%d %H:%M:%S')'"
+LDFLAGS     ?= "-s -w -X github.com/abo/influx-proxy/backend.Version=$(VERSION) -X github.com/abo/influx-proxy/backend.GitCommit=$(shell git rev-parse --short HEAD) -X 'github.com/abo/influx-proxy/backend.BuildTime=$(shell date '+%Y-%m-%d %H:%M:%S')'"
 GOBUILD_ENV = GO111MODULE=on CGO_ENABLED=0
 GOBUILD     = go build -o bin/$(PROGRAM) -a -ldflags $(LDFLAGS)
 GOX         = go run github.com/mitchellh/gox
@@ -36,10 +36,10 @@ release: cross-build
 	)
 
 test:
-	go test -v github.com/chengshiwen/influx-proxy/backend
+	go test -v github.com/abo/influx-proxy/backend
 
 bench:
-	go test -bench=. -run=none github.com/chengshiwen/influx-proxy/backend
+	go test -bench=. -run=none github.com/abo/influx-proxy/backend
 
 run:
 	go run main.go

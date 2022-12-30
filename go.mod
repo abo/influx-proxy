@@ -1,4 +1,4 @@
-module github.com/chengshiwen/influx-proxy
+module github.com/abo/influx-proxy
 
 go 1.16
 

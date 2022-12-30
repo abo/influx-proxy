@@ -13,8 +13,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/chengshiwen/influx-proxy/backend"
-	"github.com/chengshiwen/influx-proxy/service"
+	"github.com/abo/influx-proxy/backend"
+	"github.com/abo/influx-proxy/service"
 )
 
 var (

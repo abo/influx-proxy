@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/chengshiwen/influx-proxy/service/prometheus/remote"
+	"github.com/abo/influx-proxy/service/prometheus/remote"
 	"github.com/influxdata/influxdb1-client/models"
 )
 

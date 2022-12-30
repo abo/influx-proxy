@@ -19,11 +19,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chengshiwen/influx-proxy/backend"
-	"github.com/chengshiwen/influx-proxy/service/prometheus"
-	"github.com/chengshiwen/influx-proxy/service/prometheus/remote"
-	"github.com/chengshiwen/influx-proxy/transfer"
-	"github.com/chengshiwen/influx-proxy/util"
+	"github.com/abo/influx-proxy/backend"
+	"github.com/abo/influx-proxy/service/prometheus"
+	"github.com/abo/influx-proxy/service/prometheus/remote"
+	"github.com/abo/influx-proxy/transfer"
+	"github.com/abo/influx-proxy/util"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 )
@@ -284,8 +284,7 @@ func (hs *HttpService) HandlerReplica(w http.ResponseWriter, req *http.Request) 
 	db := req.URL.Query().Get("db")
 	meas := req.URL.Query().Get("meas")
 	if db != "" && meas != "" {
-		key := backend.GetKey(db, meas)
-		backends := hs.ip.GetBackends(key)
+		backends := hs.ip.GetShards(db, meas)
 		data := make([]map[string]interface{}, len(backends))
 		for i, b := range backends {
 			c := hs.ip.Circles[i]

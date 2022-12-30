@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chengshiwen/influx-proxy/util"
+	"github.com/abo/influx-proxy/util"
 	"github.com/influxdata/influxdb1-client/models"
 )
 
@@ -42,21 +42,23 @@ func NewProxy(cfg *ProxyConfig) (ip *Proxy) {
 	return
 }
 
-func GetKey(db, meas string) string {
+func GetKey(db, measurement string) string {
 	var b strings.Builder
-	b.Grow(len(db) + len(meas) + 1)
+	b.Grow(len(db) + len(measurement) + 1)
 	b.WriteString(db)
 	b.WriteString(",")
-	b.WriteString(meas)
+	b.WriteString(measurement)
 	return b.String()
 }
 
-func (ip *Proxy) GetBackends(key string) []*Backend {
-	backends := make([]*Backend, len(ip.Circles))
-	for i, circle := range ip.Circles {
-		backends[i] = circle.GetBackend(key)
+// GetShards 查询数据所在的分片节点
+func (proxy *Proxy) GetShards(database, measurement string, shardingKeys ...uint32) []*Backend {
+	shardingKey := GetKey(database, measurement)
+	shards := make([]*Backend, len(proxy.Circles))
+	for i, circle := range proxy.Circles {
+		shards[i] = circle.GetBackend(shardingKey)
 	}
-	return backends
+	return shards
 }
 
 func (ip *Proxy) GetAllBackends() []*Backend {
@@ -179,20 +181,19 @@ func (ip *Proxy) Write(p []byte, db, rp, precision string) (err error) {
 
 func (ip *Proxy) WriteRow(line []byte, db, rp, precision string) {
 	nanoLine := AppendNano(line, precision)
-	meas, err := ScanKey(nanoLine)
+	measurement, err := ScanKey(nanoLine)
 	if err != nil {
 		log.Printf("scan key error: %s", err)
 		return
 	}
-	if !RapidCheck(nanoLine[len(meas):]) {
+	if !RapidCheck(nanoLine[len(measurement):]) {
 		log.Printf("invalid format, db: %s, rp: %s, precision: %s, line: %s", db, rp, precision, string(line))
 		return
 	}
 
-	key := GetKey(db, meas)
-	backends := ip.GetBackends(key)
+	backends := ip.GetShards(db, measurement)
 	if len(backends) == 0 {
-		log.Printf("write data error: can't get backends, db: %s, meas: %s", db, meas)
+		log.Printf("write data error: can't get backends, db: %s, meas: %s", db, measurement)
 		return
 	}
 
@@ -209,8 +210,7 @@ func (ip *Proxy) WritePoints(points []models.Point, db, rp string) error {
 	var err error
 	for _, pt := range points {
 		meas := string(pt.Name())
-		key := GetKey(db, meas)
-		backends := ip.GetBackends(key)
+		backends := ip.GetShards(db, meas)
 		if len(backends) == 0 {
 			log.Printf("write point error: can't get backends, db: %s, meas: %s", db, meas)
 			err = ErrEmptyBackends

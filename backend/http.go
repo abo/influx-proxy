@@ -20,7 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/chengshiwen/influx-proxy/util"
+	"github.com/abo/influx-proxy/util"
 )
 
 var (
@@ -191,6 +191,11 @@ func (hb *HttpBackend) SetTransferIn(b bool) {
 
 func (hb *HttpBackend) IsWriteOnly() (b bool) {
 	return hb.writeOnly || hb.transferIn.Load().(bool)
+}
+
+// is rewriting or write-only
+func (hb *HttpBackend) IsWriting() (b bool) {
+	return hb.IsRewriting() || hb.IsWriteOnly()
 }
 
 func (hb *HttpBackend) Ping() bool {
