@@ -4,7 +4,9 @@
 
 package backend
 
-import "testing"
+import (
+	"testing"
+)
 
 // ALTER RETENTION POLICY "1h.cpu" ON "mydb" DEFAULT
 // ALTER RETENTION POLICY "policy1" ON "somedb" DURATION 1h REPLICATION 4
@@ -456,6 +458,17 @@ func BenchmarkGetRetentionPolicyFromInfluxQL(b *testing.B) {
 	}
 }
 
+func TestGetConditionFromTokens(t *testing.T) {
+	q := `SELECT mean("value") FROM mydb."autogen"."cpu" WHERE "region" = 'uswest' GROUP BY time(10m) fill(0)`
+	v, e := GetConditionFromTokens(ScanTokens(q, 0), "Region")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if v != "uswest" {
+		t.Fatal("got ", v)
+	}
+}
+
 func BenchmarkGetMeasurementFromInfluxQL(b *testing.B) {
 	q := `SELECT mean("value") FROM "cpu" WHERE "region" = 'uswest' GROUP BY time(10m) fill(0)`
 	for i := 0; i < b.N; i++ {
@@ -470,3 +483,31 @@ func BenchmarkGetMeasurementFromInfluxQL(b *testing.B) {
 		}
 	}
 }
+
+// func BenchmarkGetMeasurementFromInfluxQLV2(b *testing.B) {
+// 	q := `SELECT mean("value") FROM "cpu" WHERE "region" = 'uswest' GROUP BY time(10m) fill(0)`
+// 	for i := 0; i < b.N; i++ {
+// 		qm, err := parseSource(q)
+// 		if err != nil {
+// 			b.Errorf("error: %s", err)
+// 			return
+// 		}
+// 		if qm != "cpu" {
+// 			b.Errorf("measurement wrong: %s != %s", qm, "cpu")
+// 			return
+// 		}
+// 	}
+// }
+
+// func parseSource(q string) (string, error) {
+// 	stat, err := influxql.ParseStatement(q)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	switch stat.(type) {
+// 	case *influxql.SelectStatement:
+// 		source := stat.(*influxql.SelectStatement).Sources[0]
+// 		return source.(*influxql.Measurement).Name, nil
+// 	}
+// 	return "", nil
+// }

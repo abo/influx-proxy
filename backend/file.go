@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/abo/influx-proxy/util"
 )
 
 type FileBackend struct {
@@ -24,11 +26,14 @@ type FileBackend struct {
 }
 
 func NewFileBackend(filename string, datadir string) (fb *FileBackend, err error) {
+	if err = util.MakeDir(datadir); err != nil {
+		return
+	}
+
 	fb = &FileBackend{
 		filename: filename,
 		datadir:  datadir,
 	}
-
 	pathname := filepath.Join(datadir, filename)
 	fb.producer, err = os.OpenFile(pathname+".dat", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {

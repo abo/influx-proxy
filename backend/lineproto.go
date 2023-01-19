@@ -39,6 +39,31 @@ func ScanKey(pointbuf []byte) (key string, err error) {
 	}
 	return "", io.EOF
 }
+func ScanTagValue(pointbuf []byte, tagName string) (value string, err error) {
+	idx := bytes.Index(pointbuf, []byte(tagName))
+	if idx < 0 {
+		return "", io.EOF
+	}
+	if pointbuf[idx+len(tagName)] != '=' {
+		return "", ErrShardingTagNotFound
+	}
+
+	var b strings.Builder
+	for i := idx + len(tagName) + 1; i < len(pointbuf); i++ {
+		c := pointbuf[i]
+		switch c {
+		case '\\':
+			i++
+			b.WriteByte(pointbuf[i])
+		case ' ', ',':
+			value = b.String()
+			return
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return "", io.EOF
+}
 
 func ScanTime(buf []byte) (int, bool) {
 	i := len(buf) - 1

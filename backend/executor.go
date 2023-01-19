@@ -8,12 +8,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
-	"math/rand"
 	"net/http"
-	"sort"
 	"sync"
 
+	"github.com/abo/influx-proxy/log"
 	"github.com/abo/influx-proxy/util"
 	"github.com/influxdata/influxdb1-client/models"
 )
@@ -28,18 +26,10 @@ var (
 
 // 选择 active 的节点执行 query, 返回第一个成功的结果. 优先选择 non-writing 的节点上执行, 当满足条件的节点有多个时, 尽量均衡其负载
 func execQuery(w http.ResponseWriter, r *http.Request, nodes []*Backend, queryFn func(*Backend, *http.Request, http.ResponseWriter) ([]byte, error)) (body []byte, err error) {
-	// 优先在无写入的节点上执行，多个时随机
-	randSeq := rand.Perm(len(nodes))
-	sort.Slice(randSeq, func(i, j int) bool {
-		less := !nodes[randSeq[i]].IsWriting() && nodes[randSeq[j]].IsWriting()
-		return less
-	})
-
-	for _, idx := range randSeq {
-		b := nodes[idx]
-		if !b.IsActive() {
+	for _, node := range nodes {
+		if !node.IsActive() {
 			continue
-		} else if body, err = queryFn(b, r, w); err == nil {
+		} else if body, err = queryFn(node, r, w); err == nil {
 			return
 		}
 	}
@@ -50,51 +40,46 @@ func execQuery(w http.ResponseWriter, r *http.Request, nodes []*Backend, queryFn
 	return
 }
 
-func ReadProm(w http.ResponseWriter, req *http.Request, ip *Proxy, db, measurement string) (err error) {
+func ReadProm(w http.ResponseWriter, req *http.Request, backends []*Backend) (err error) {
 	// all circles -> backend by key(db,meas) -> select or show
 	fn := func(be *Backend, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		err = be.ReadProm(req, w)
 		return nil, err
 	}
-	_, err = execQuery(w, req, ip.GetShards(db, measurement), fn)
+	_, err = execQuery(w, req, backends, fn)
 	return
 }
 
-func QueryFlux(w http.ResponseWriter, req *http.Request, ip *Proxy, bucket, measurement string) (err error) {
+func QueryFlux(w http.ResponseWriter, req *http.Request, backends []*Backend) (err error) {
 	// all circles -> backend by key(org,bucket,meas) -> query flux
 	fn := func(be *Backend, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		err = be.QueryFlux(req, w)
 		return nil, err
 	}
-	_, err = execQuery(w, req, ip.GetShards(bucket, measurement), fn)
+	_, err = execQuery(w, req, backends, fn)
 	return
 }
 
-func QueryFromQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []string, db string) (body []byte, err error) {
+func QueryFromQL(w http.ResponseWriter, req *http.Request, nodes []*Backend) (body []byte, err error) {
 	// all circles -> backend by key(db,meas) -> select or show
-	measurement, err := GetMeasurementFromTokens(tokens)
-	if err != nil {
-		return nil, ErrGetMeasurement
-	}
 	fn := func(be *Backend, req *http.Request, w http.ResponseWriter) ([]byte, error) {
 		qr := be.Query(req, w, false)
 		return qr.Body, qr.Err
 	}
-	body, err = execQuery(w, req, ip.GetShards(db, measurement), fn)
+	body, err = execQuery(w, req, nodes, fn)
 	return
 }
 
-func QueryShowQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []string) (body []byte, err error) {
+func QueryShowQL(w http.ResponseWriter, req *http.Request, backends []*Backend, tokens []string) (body []byte, err error) {
 	// all circles -> all backends -> show
 	// remove support of query parameter `chunked`
 	req.Form.Del("chunked")
-	backends := ip.GetAllBackends()
 	bodies, inactive, err := QueryInParallel(backends, req, w, true)
 	if err != nil {
 		return
 	}
 	if inactive > 0 {
-		log.Printf("query: %s, inactive: %d/%d backends unavailable", req.FormValue("q"), inactive, inactive+len(bodies))
+		log.Warnf("query: %s, inactive: %d/%d backends unavailable", req.FormValue("q"), inactive, inactive+len(bodies))
 		if len(bodies) == 0 {
 			return nil, ErrBackendsUnavailable
 		}
@@ -105,8 +90,10 @@ func QueryShowQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []s
 	stmt3 := GetHeadStmtFromTokens(tokens, 3)
 	if stmt2 == "show measurements" || stmt2 == "show series" || stmt2 == "show databases" {
 		rsp, err = reduceByValues(bodies)
-	} else if stmt3 == "show field keys" || stmt3 == "show tag keys" || stmt3 == "show tag values" {
+	} else if stmt3 == "show field keys" || stmt3 == "show tag keys" {
 		rsp, err = reduceBySeries(bodies)
+	} else if stmt3 == "show tag values" {
+		rsp, err = reduceBySeriesV2(bodies)
 	} else if stmt3 == "show retention policies" {
 		rsp, err = attachByValues(bodies)
 	} else if stmt2 == "show stats" {
@@ -132,32 +119,16 @@ func QueryShowQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []s
 	return
 }
 
-func QueryDeleteOrDropQL(w http.ResponseWriter, req *http.Request, ip *Proxy, tokens []string, db string) (body []byte, err error) {
-	// all circles -> backend by key(db,meas) -> delete or drop measurement/series
-	measurement, err := GetMeasurementFromTokens(tokens)
-	if err != nil {
-		return nil, err
-	}
-	backends := ip.GetShards(db, measurement)
-	return QueryBackends(backends, req, w)
-}
-
-func QueryAlterQL(w http.ResponseWriter, req *http.Request, ip *Proxy) (body []byte, err error) {
-	// all circles -> all backends -> create or drop database; create, alter or drop retention policy
-	backends := ip.GetAllBackends()
-	return QueryBackends(backends, req, w)
-}
-
-func QueryBackends(backends []*Backend, req *http.Request, w http.ResponseWriter) (body []byte, err error) {
+func QueryAll(r *http.Request, w http.ResponseWriter, backends []*Backend) (body []byte, err error) {
 	if len(backends) == 0 {
 		return nil, ErrGetBackends
 	}
 	for _, be := range backends {
 		if !be.IsActive() {
-			return nil, fmt.Errorf("backend %s(%s) unavailable", be.Name, be.Url)
+			return nil, fmt.Errorf("backend %s unavailable", be.Url)
 		}
 	}
-	bodies, _, err := QueryInParallel(backends, req, w, false)
+	bodies, _, err := QueryInParallel(backends, r, w, false)
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +216,48 @@ func reduceBySeries(bodies [][]byte) (rsp *Response, err error) {
 		series = append(series, serie)
 	}
 	return ResponseFromSeries(series), nil
+}
+
+func reduceBySeriesV2(bodies [][]byte) (rsp *Response, err error) {
+	var series models.Rows
+	seriesMap := make(map[string]*models.Row)
+	for _, b := range bodies {
+		_series, err := SeriesFromResponseBytes(b)
+		if err != nil {
+			return nil, err
+		}
+		for _, serie := range _series {
+			if prev, prs := seriesMap[serie.Name]; !prs {
+				seriesMap[serie.Name] = serie
+			} else {
+				for _, val := range serie.Values {
+					found := false
+					for i := 0; i < len(prev.Values) && !found; i++ {
+						found = equal(val, prev.Values[i])
+					}
+					if !found {
+						prev.Values = append(prev.Values, val)
+					}
+				}
+			}
+		}
+	}
+	for _, serie := range seriesMap {
+		series = append(series, serie)
+	}
+	return ResponseFromSeries(series), nil
+}
+
+func equal(a []interface{}, b []interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func attachByValues(bodies [][]byte) (rsp *Response, err error) {

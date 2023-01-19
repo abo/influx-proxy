@@ -7,13 +7,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"runtime"
 	"time"
 
 	"github.com/abo/influx-proxy/backend"
+	"github.com/abo/influx-proxy/log"
 	"github.com/abo/influx-proxy/service"
 )
 
@@ -23,8 +22,8 @@ var (
 )
 
 func init() {
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.Lshortfile)
-	log.SetOutput(os.Stdout)
+	log.Init(log.Options{Level: "info", File: ""})
+
 	flag.StringVar(&configFile, "config", "proxy.json", "proxy config file with json/yaml/toml format")
 	flag.BoolVar(&version, "version", false, "proxy version")
 	flag.Parse()
@@ -49,26 +48,25 @@ func main() {
 		fmt.Printf("illegal config file: %s\n", err)
 		return
 	}
-	log.Printf("version: %s, commit: %s, build: %s", backend.Version, backend.GitCommit, backend.BuildTime)
+	log.Infof("version: %s, commit: %s, build: %s", backend.Version, backend.GitCommit, backend.BuildTime)
 	cfg.PrintSummary()
-
-	mux := service.NewServeMux()
-	service.NewHttpService(cfg).Register(mux)
+	log.Init(cfg.Logging)
 
 	server := &http.Server{
-		Addr:        cfg.ListenAddr,
-		Handler:     mux,
-		IdleTimeout: time.Duration(cfg.IdleTimeout) * time.Second,
+		Addr:        cfg.Proxy.ListenAddr,
+		Handler:     service.NewHttpService(cfg).Handler(),
+		IdleTimeout: time.Duration(cfg.Proxy.IdleTimeout) * time.Second,
 	}
-	if cfg.HTTPSEnabled {
-		log.Printf("https service start, listen on %s", server.Addr)
-		err = server.ListenAndServeTLS(cfg.HTTPSCert, cfg.HTTPSKey)
+
+	if cfg.Proxy.HTTPSCert != "" || cfg.Proxy.HTTPSKey != "" {
+		log.Infof("https service start, listen on %s", server.Addr)
+		err = server.ListenAndServeTLS(cfg.Proxy.HTTPSCert, cfg.Proxy.HTTPSKey)
 	} else {
-		log.Printf("http service start, listen on %s", server.Addr)
+		log.Infof("http service start, listen on %s", server.Addr)
 		err = server.ListenAndServe()
 	}
 	if err != nil {
-		log.Print(err)
+		log.Error(err)
 		return
 	}
 }

@@ -68,6 +68,27 @@ func TestScanKey(t *testing.T) {
 	}
 }
 
+func TestScanTagValue(t *testing.T) {
+	tests := []struct {
+		line []byte
+		tag  string
+		want string
+	}{{[]byte("cpu2,host=server04,region=us-west,direction=out running=false,status=\"fail\" 1596819659"), "region", "us-west"},
+		{[]byte("cpu2,host=server04,region=us-west,direction=out running=false,status=\"fail\" 1596819659"), "host", "server04"},
+		{[]byte("cpu4 idle=39,system=56i,user=\"Jay Chou\",brief\\ desc=\"the best \\\"singer\\\"\" 1422568543702"), "system", "56i"},
+	}
+	for _, tt := range tests {
+		val, err := ScanTagValue(tt.line, tt.tag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if val != val {
+			t.Fatal(val)
+		}
+	}
+
+}
+
 func BenchmarkScanKey(b *testing.B) {
 	buf := &bytes.Buffer{}
 	for i := 0; i < b.N; i++ {

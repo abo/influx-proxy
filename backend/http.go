@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/abo/influx-proxy/log"
 	"github.com/abo/influx-proxy/util"
 )
 
@@ -46,7 +46,6 @@ type QueryResult struct {
 type HttpBackend struct { // nolint:golint
 	client      *http.Client
 	transport   *http.Transport
-	Name        string
 	Url         string // nolint:golint
 	username    string
 	password    string
@@ -70,7 +69,6 @@ func NewHttpBackend(cfg *BackendConfig, pxcfg *ProxyConfig) (hb *HttpBackend) { 
 func NewSimpleHttpBackend(cfg *BackendConfig) (hb *HttpBackend) { // nolint:golint
 	hb = &HttpBackend{
 		transport:   NewTransport(strings.HasPrefix(cfg.Url, "https")),
-		Name:        cfg.Name,
 		Url:         cfg.Url,
 		username:    cfg.Username,
 		password:    cfg.Password,
@@ -201,12 +199,12 @@ func (hb *HttpBackend) IsWriting() (b bool) {
 func (hb *HttpBackend) Ping() bool {
 	resp, err := hb.client.Get(hb.Url + "/ping")
 	if err != nil {
-		log.Print("http error: ", err)
+		log.Errorf("http error: ", err)
 		return false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 204 {
-		log.Printf("ping status code: %d, the backend is %s", resp.StatusCode, hb.Url)
+		log.Errorf("ping status code: %d, the backend is %s", resp.StatusCode, hb.Url)
 		return false
 	}
 	return true
@@ -216,7 +214,7 @@ func (hb *HttpBackend) Write(db, rp string, p []byte) (err error) {
 	var buf bytes.Buffer
 	err = Compress(&buf, p)
 	if err != nil {
-		log.Print("compress error: ", err)
+		log.Errorf("compress error: ", err)
 		return
 	}
 	return hb.WriteStream(db, rp, &buf, true)
@@ -241,7 +239,7 @@ func (hb *HttpBackend) WriteStream(db, rp string, stream io.Reader, compressed b
 
 	resp, err := hb.client.Do(req)
 	if err != nil {
-		log.Print("http error: ", err)
+		log.Errorf("http error: ", err)
 		hb.active.Store(false)
 		return
 	}
@@ -250,14 +248,14 @@ func (hb *HttpBackend) WriteStream(db, rp string, stream io.Reader, compressed b
 	if resp.StatusCode == 204 {
 		return
 	}
-	log.Printf("write status code: %d, from: %s", resp.StatusCode, hb.Url)
+	log.Infof("write status code: %d, from: %s", resp.StatusCode, hb.Url)
 
 	respbuf, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Print("readall error: ", err)
+		log.Errorf("readall error: ", err)
 		return
 	}
-	log.Printf("error response: %s", respbuf)
+	log.Errorf("error response: %s", respbuf)
 
 	switch resp.StatusCode {
 	case 400:
@@ -289,13 +287,13 @@ func (hb *HttpBackend) ReadProm(req *http.Request, w http.ResponseWriter) (err e
 
 	req.URL, err = url.Parse(hb.Url + "/api/v1/prom/read?" + req.Form.Encode())
 	if err != nil {
-		log.Print("internal url parse error: ", err)
+		log.Errorf("internal url parse error: ", err)
 		return
 	}
 
 	resp, err := hb.transport.RoundTrip(req)
 	if err != nil {
-		log.Printf("prometheus read error: %s", err)
+		log.Errorf("prometheus read error: %s", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -304,7 +302,7 @@ func (hb *HttpBackend) ReadProm(req *http.Request, w http.ResponseWriter) (err e
 
 	p, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("prometheus read body error: %s", err)
+		log.Errorf("prometheus read body error: %s", err)
 		return
 	}
 
@@ -320,13 +318,13 @@ func (hb *HttpBackend) QueryFlux(req *http.Request, w http.ResponseWriter) (err 
 
 	req.URL, err = url.Parse(hb.Url + "/api/v2/query")
 	if err != nil {
-		log.Print("internal url parse error: ", err)
+		log.Errorf("internal url parse error: ", err)
 		return
 	}
 
 	resp, err := hb.transport.RoundTrip(req)
 	if err != nil {
-		log.Printf("flux query error: %s", err)
+		log.Errorf("flux query error: %s", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -335,7 +333,7 @@ func (hb *HttpBackend) QueryFlux(req *http.Request, w http.ResponseWriter) (err 
 
 	p, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("flux read body error: %s", err)
+		log.Errorf("flux read body error: %s", err)
 		return
 	}
 	w.WriteHeader(resp.StatusCode)
@@ -357,7 +355,7 @@ func (hb *HttpBackend) Query(req *http.Request, w http.ResponseWriter, decompres
 
 	req.URL, qr.Err = url.Parse(hb.Url + "/query?" + req.Form.Encode())
 	if qr.Err != nil {
-		log.Print("internal url parse error: ", qr.Err)
+		log.Errorf("internal url parse error: ", qr.Err)
 		return
 	}
 
@@ -366,7 +364,7 @@ func (hb *HttpBackend) Query(req *http.Request, w http.ResponseWriter, decompres
 	if err != nil {
 		if req.Header.Get(HeaderQueryOrigin) != QueryParallel || err.Error() != "context canceled" {
 			qr.Err = err
-			log.Printf("query error: %s, the query is %s", err, q)
+			log.Errorf("query error: %s, the query is %s", err, q)
 		}
 		return
 	}
@@ -380,7 +378,7 @@ func (hb *HttpBackend) Query(req *http.Request, w http.ResponseWriter, decompres
 		b, err := gzip.NewReader(resp.Body)
 		if err != nil {
 			qr.Err = err
-			log.Printf("unable to decode gzip body: %s", err)
+			log.Errorf("unable to decode gzip body: %s", err)
 			return
 		}
 		defer b.Close()
@@ -389,7 +387,7 @@ func (hb *HttpBackend) Query(req *http.Request, w http.ResponseWriter, decompres
 
 	qr.Body, qr.Err = ioutil.ReadAll(respBody)
 	if qr.Err != nil {
-		log.Printf("read body error: %s, the query is %s", qr.Err, q)
+		log.Errorf("read body error: %s, the query is %s", qr.Err, q)
 		return
 	}
 	if resp.StatusCode >= 400 {
@@ -441,6 +439,26 @@ func (hb *HttpBackend) GetTagKeys(db, rp, meas string) []string {
 	return hb.GetSeriesValues(db, fmt.Sprintf("show tag keys from \"%s\".\"%s\"", util.EscapeIdentifier(rp), util.EscapeIdentifier(meas)))
 }
 
+func (hb *HttpBackend) GetTagValues(db, measurement, tagName string, limit, offset int) []string {
+	q := fmt.Sprintf("show tag values from %s with key = \"%s\" limit %d offset %d", util.EscapeIdentifier(measurement), tagName, limit, offset)
+
+	var values []string
+	qr := hb.Query(NewQueryRequest("GET", db, q, ""), nil, true)
+	if qr.Err != nil {
+		return values
+	}
+	series, _ := SeriesFromResponseBytes(qr.Body)
+	for _, s := range series {
+		for _, v := range s.Values {
+			if s.Name == "databases" && v[0].(string) == "_internal" {
+				continue
+			}
+			values = append(values, v[1].(string))
+		}
+	}
+	return values
+}
+
 func (hb *HttpBackend) GetFieldKeys(db, rp, meas string) map[string][]string {
 	fieldKeys := make(map[string][]string)
 	q := fmt.Sprintf("show field keys from \"%s\".\"%s\"", util.EscapeIdentifier(rp), util.EscapeIdentifier(meas))
@@ -460,6 +478,12 @@ func (hb *HttpBackend) GetFieldKeys(db, rp, meas string) map[string][]string {
 
 func (hb *HttpBackend) DropMeasurement(db, meas string) ([]byte, error) {
 	q := fmt.Sprintf("drop measurement \"%s\"", util.EscapeIdentifier(meas))
+	qr := hb.Query(NewQueryRequest("POST", db, q, ""), nil, true)
+	return qr.Body, qr.Err
+}
+
+func (hb *HttpBackend) DropSeries(db, meas, tag string, tagVal uint64) ([]byte, error) {
+	q := fmt.Sprintf("drop series from \"%s\" where %s='%d'", util.EscapeIdentifier(meas), tag, tagVal)
 	qr := hb.Query(NewQueryRequest("POST", db, q, ""), nil, true)
 	return qr.Body, qr.Err
 }

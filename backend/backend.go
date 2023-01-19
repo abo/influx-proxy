@@ -6,13 +6,14 @@ package backend
 
 import (
 	"bytes"
+	"fmt"
 	"io"
-	"log"
 	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/abo/influx-proxy/log"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -37,7 +38,7 @@ type Backend struct {
 	wg              sync.WaitGroup
 }
 
-func NewBackend(cfg *BackendConfig, pxcfg *ProxyConfig) (ib *Backend) {
+func NewBackend(ID int, cfg *BackendConfig, pxcfg *ProxyConfig) (ib *Backend) {
 	ib = &Backend{
 		HttpBackend:     NewHttpBackend(cfg, pxcfg),
 		flushSize:       pxcfg.FlushSize,
@@ -50,7 +51,7 @@ func NewBackend(cfg *BackendConfig, pxcfg *ProxyConfig) (ib *Backend) {
 	ib.running.Store(true)
 
 	var err error
-	ib.fb, err = NewFileBackend(cfg.Name, pxcfg.DataDir)
+	ib.fb, err = NewFileBackend(fmt.Sprintf("node%d", ID), pxcfg.DataDir)
 	if err != nil {
 		panic(err)
 	}
@@ -122,18 +123,18 @@ func (ib *Backend) WriteBuffer(point *LinePoint) (err error) {
 	}
 	n, err := cb.Buffer.Write(line)
 	if err != nil {
-		log.Printf("buffer write error: %s", err)
+		log.Errorf("buffer write error: %s", err)
 		return
 	}
 	if n != len(line) {
 		err = io.ErrShortWrite
-		log.Printf("buffer write error: %s", err)
+		log.Errorf("buffer write error: %s", err)
 		return
 	}
 	if line[len(line)-1] != '\n' {
 		err = cb.Buffer.WriteByte('\n')
 		if err != nil {
-			log.Printf("buffer write error: %s", err)
+			log.Errorf("buffer write error: %s", err)
 			return
 		}
 	}
@@ -165,7 +166,7 @@ func (ib *Backend) FlushBuffer(db, rp string) {
 		var buf bytes.Buffer
 		err := Compress(&buf, p)
 		if err != nil {
-			log.Print("compress buffer error: ", err)
+			log.Errorf("compress buffer error: ", err)
 			return
 		}
 
@@ -177,20 +178,20 @@ func (ib *Backend) FlushBuffer(db, rp string) {
 			case nil:
 				return
 			case ErrBadRequest:
-				log.Printf("bad request, drop all data")
+				log.Error("bad request, drop all data")
 				return
 			case ErrNotFound:
-				log.Printf("bad backend, drop all data")
+				log.Error("bad backend, drop all data")
 				return
 			default:
-				log.Printf("write http error, url: %s, db: %s, rp: %s, plen: %d", ib.Url, db, rp, len(p))
+				log.Errorf("write http error, url: %s, db: %s, rp: %s, plen: %d", ib.Url, db, rp, len(p))
 			}
 		}
 
 		b := bytes.Join([][]byte{[]byte(url.QueryEscape(db)), []byte(url.QueryEscape(rp)), p}, []byte{' '})
 		err = ib.fb.Write(b)
 		if err != nil {
-			log.Printf("write db and data to file error: %s, db: %s, rp: %s, plen: %d", err, db, rp, len(p))
+			log.Errorf("write db and data to file error: %s, db: %s, rp: %s, plen: %d", err, db, rp, len(p))
 			return
 		}
 	})
@@ -235,7 +236,7 @@ func (ib *Backend) RewriteLoop() {
 func (ib *Backend) Rewrite() (err error) {
 	b, err := ib.fb.Read()
 	if err != nil {
-		log.Print("rewrite read file error: ", err)
+		log.Errorf("rewrite read file error: ", err)
 		return
 	}
 	if b == nil {
@@ -244,17 +245,17 @@ func (ib *Backend) Rewrite() (err error) {
 
 	p := bytes.SplitN(b, []byte{' '}, 3)
 	if len(p) < 3 {
-		log.Print("rewrite read invalid data with length: ", len(p))
+		log.Errorf("rewrite read invalid data with length: ", len(p))
 		return
 	}
 	db, err := url.QueryUnescape(string(p[0]))
 	if err != nil {
-		log.Print("rewrite db unescape error: ", err)
+		log.Errorf("rewrite db unescape error: ", err)
 		return
 	}
 	rp, err := url.QueryUnescape(string(p[1]))
 	if err != nil {
-		log.Print("rewrite rp unescape error: ", err)
+		log.Errorf("rewrite rp unescape error: ", err)
 		return
 	}
 	err = ib.WriteCompressed(db, rp, p[2])
@@ -262,24 +263,24 @@ func (ib *Backend) Rewrite() (err error) {
 	switch err {
 	case nil:
 	case ErrBadRequest:
-		log.Printf("bad request, drop all data")
+		log.Error("bad request, drop all data")
 		err = nil
 	case ErrNotFound:
-		log.Printf("bad backend, drop all data")
+		log.Error("bad backend, drop all data")
 		err = nil
 	default:
-		log.Printf("rewrite http error, url: %s, db: %s, rp: %s, plen: %d", ib.Url, db, rp, len(p[1]))
+		log.Errorf("rewrite http error, url: %s, db: %s, rp: %s, plen: %d", ib.Url, db, rp, len(p[1]))
 
 		err = ib.fb.RollbackMeta()
 		if err != nil {
-			log.Printf("rollback meta error: %s", err)
+			log.Errorf("rollback meta error: %s", err)
 		}
 		return
 	}
 
 	err = ib.fb.UpdateMeta()
 	if err != nil {
-		log.Printf("update meta error: %s", err)
+		log.Errorf("update meta error: %s", err)
 	}
 	return
 }
@@ -293,9 +294,8 @@ func (ib *Backend) Close() {
 	close(ib.chWrite)
 }
 
-func (ib *Backend) GetHealth(ic *Circle, withStats bool) interface{} {
+func (ib *Backend) GetHealth(withStats bool) interface{} {
 	health := struct {
-		Name      string      `json:"name"`
 		Url       string      `json:"url"` // nolint:golint
 		Active    bool        `json:"active"`
 		Backlog   bool        `json:"backlog"`
@@ -304,7 +304,6 @@ func (ib *Backend) GetHealth(ic *Circle, withStats bool) interface{} {
 		Healthy   bool        `json:"healthy,omitempty"`
 		Stats     interface{} `json:"stats,omitempty"`
 	}{
-		Name:      ib.Name,
 		Url:       ib.Url,
 		Active:    ib.IsActive(),
 		Backlog:   ib.fb.IsData(),
@@ -323,14 +322,12 @@ func (ib *Backend) GetHealth(ic *Circle, withStats bool) interface{} {
 			defer wg.Done()
 			inplace, incorrect := 0, 0
 			measurements := ib.GetMeasurements(db)
-			for _, measurement := range measurements {
-				nb := ic.GetBackend(GetKey(db, measurement))
-				if nb.Url == ib.Url {
-					inplace++
-				} else {
-					incorrect++
-				}
-			}
+			// for _, measurement := range measurements {
+			// is is managed measurement,
+
+			// }
+			// TODO 重新设计该信息，基于元数据 ,  show tag values exact cardinality from measurement with key="customer"
+			// 包含哪些 measurement ？ 已分片的/未分片的，
 			smap.Store(db, map[string]int{
 				"measurements": len(measurements),
 				"inplace":      inplace,

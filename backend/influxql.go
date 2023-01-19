@@ -34,10 +34,12 @@ var SupportCmds = util.NewSet(
 )
 
 var (
-	ErrWrongBackslash = errors.New("wrong backslash")
-	ErrUnmatchedQuote = errors.New("unmatched quote")
-	ErrUnclosed       = errors.New("unclosed parenthesis")
-	ErrIllegalQL      = errors.New("illegal InfluxQL")
+	ErrWrongBackslash      = errors.New("wrong backslash")
+	ErrUnmatchedQuote      = errors.New("unmatched quote")
+	ErrUnclosed            = errors.New("unclosed parenthesis")
+	ErrIllegalQL           = errors.New("illegal InfluxQL")
+	ErrUnsupportQL         = errors.New("unsupport InfluxQL")
+	ErrShardingTagNotFound = errors.New("shardingtag notfound")
 )
 
 func FindEndWithQuote(data []byte, start int, endchar byte) (end int, unquoted []byte, err error) {
@@ -274,6 +276,26 @@ func GetMeasurementFromTokens(tokens []string) (mm string, err error) {
 		}
 	}
 	return
+}
+
+func GetConditionFromTokens(tokens []string, field string) (val string, err error) {
+	field = strings.ToLower(field)
+	return GetIdentifierFromTokens(tokens, []string{"where"}, func(conditions []string, where string) string {
+		for i := 0; i < len(conditions); i++ {
+			v := conditions[i]
+			if v[0] == '"' || v[0] == '\'' {
+				v = v[1 : len(v)-1]
+			}
+			v = strings.ToLower(v)
+			if v == field && (i+2 < len(conditions)) && conditions[i+1] == "=" {
+				val = conditions[i+2]
+				if val[0] == '"' || val[0] == '\'' {
+					return val[1 : len(val)-1]
+				}
+			}
+		}
+		return ""
+	})
 }
 
 func GetIdentifierFromTokens(tokens []string, keywords []string, fn func([]string, string) string) (string, error) {
