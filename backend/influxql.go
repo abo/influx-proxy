@@ -20,6 +20,7 @@ var SupportCmds = util.NewSet(
 	"show field keys",
 	"show tag keys",
 	"show tag values",
+	"show tag values cardinality",
 	"show stats",
 	"show databases",
 	"create database",

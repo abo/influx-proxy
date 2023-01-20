@@ -153,7 +153,7 @@ func (ip *Proxy) Query(w http.ResponseWriter, req *http.Request) (body []byte, e
 	} else if alterDb || backend.CheckRetentionPolicyFromTokens(tokens) {
 		return backend.QueryAll(req, w, ip.GetAllBackends())
 	}
-	return nil, backend.ErrIllegalQL
+	return nil, backend.ErrUnsupportQL
 }
 
 func (ip *Proxy) Write(p []byte, db, rp, precision string) (err error) {
