@@ -22,20 +22,22 @@ type DataManager interface {
 	// 返回集群管理范围内的所有 measurement
 	GetManagedMeasurements() []string
 
+	IsManagedMeasurement(dbAndMeasurement string) bool
+
 	// 扫描指定节点的原始数据，获取所有 shardingTag 值
-	ScanTagValues(measurement string, shard int32, shardingTag string, fn func([]uint64) bool) error
+	ScanTagValues(dbAndMeasurement string, shard int32, shardingTag string, fn func([]uint64) bool) error
 	// ScanShardingTagValues(shard int32, measurement string) []uint64
 
 	// 将 measurement 中 shardingTagValue 对应的所有原始数据，从 srcShard 迁移到 destShards
-	CopySeries(measurement string, srcShard int32, destShards []int32, shardingTag string, tagValue uint64) error
+	CopySeries(dbAndMeasurement string, srcShard int32, destShards []int32, shardingTag string, tagValue uint64) error
 
 	//
-	RemoveSeries(measurement string, shard int32, shardingTag string, tagValue uint64) error
+	RemoveSeries(dbAndMeasurement string, shard int32, shardingTag string, tagValue uint64) error
 
 	// 从 srcNode 中将指定 Measurement 整体复制到 destNode
-	CopyMeasurement(srcNode int32, destNodes []int32, measurement string) error
+	CopyMeasurement(srcNode int32, destNodes []int32, dbAndMeasurement string) error
 
-	RemoveMeasurement(node int32, measurement string) error
+	RemoveMeasurement(node int32, dbAndMeasurement string) error
 }
 
 type replicaState int
@@ -48,11 +50,13 @@ const (
 // 对 measurement 的 replica 进行分片, 计算每条数据的分片位置, 以及触发对应的迁移/均衡
 // 对于不分片的 measurement, 当作分片数 1 处理,
 type ReplicaSharder struct {
-	dmgr        DataManager
-	shardingTag map[string]string
-	meta        map[string][]int32        // 各 measurement 下, 每个 replica 的分片数, 结构为 measurement -> [r0.shards, r1.shards ...];  如果该 measurement 不分片, 则存放各 replica 的节点数
-	state       map[string][]replicaState // 各 replica 的状态, 结构为 measurement -> [r0.state, r1.state...]
-	mu          sync.RWMutex              // mu protects meta & state
+	defaultNumberOfReplicas int
+	defaultNumberOfShards   int
+	dmgr                    DataManager
+	shardingTag             map[string]string
+	meta                    map[string][]int32        // 各 measurement 下, 每个 replica 的分片数, 结构为 measurement -> [r0.shards, r1.shards ...];  如果该 measurement 不分片, 则存放各 replica 的节点数
+	state                   map[string][]replicaState // 各 replica 的状态, 结构为 measurement -> [r0.state, r1.state...]
+	mu                      sync.RWMutex              // mu protects meta & state
 }
 
 func NewSharder(dmgr DataManager, cfg []*Config) *ReplicaSharder {
@@ -69,6 +73,8 @@ func NewSharder(dmgr DataManager, cfg []*Config) *ReplicaSharder {
 // 对于 sharding measurement, 默认按节点数分片, 也就是每个节点有一部分数据
 // 对于 unsharding measurement, 整表在节点间复制和均衡, 相当于分片数是 1, 也就是某些分片为空
 func (rs *ReplicaSharder) Init(numberOfNodes, defaultNumberOfReplicas int) {
+	rs.defaultNumberOfReplicas = defaultNumberOfReplicas
+	rs.defaultNumberOfShards = numberOfNodes
 	rs.mu.Lock()
 	for _, measurement := range rs.dmgr.GetManagedMeasurements() {
 		rs.meta[measurement] = make([]int32, defaultNumberOfReplicas)
@@ -89,14 +95,31 @@ func (rs *ReplicaSharder) GetShardingTag(measurement string) (string, bool) {
 
 func (rs *ReplicaSharder) getNumberOfReplicas(measurement string) int {
 	rs.mu.RLock()
-	defer rs.mu.RUnlock()
-	return len(rs.meta[measurement])
+	replicas, prs := rs.meta[measurement]
+	rs.mu.RUnlock()
+
+	// 在 managed measurement 使用通配符, 并且 Init 时 db 中没有数据, 后续写入时会找不到元信息, 因此需要延迟初始化
+	if !prs && rs.dmgr.IsManagedMeasurement(measurement) {
+		replicas = make([]int32, rs.defaultNumberOfReplicas)
+		state := make([]replicaState, len(replicas))
+		for i := 0; i < len(replicas); i++ {
+			replicas[i] = int32(rs.defaultNumberOfShards)
+			state[i] = balanced
+		}
+
+		rs.mu.Lock()
+		rs.meta[measurement] = replicas
+		rs.state[measurement] = state
+		rs.mu.Unlock()
+	}
+	return len(replicas)
 }
 
+// 对于分片的 measurement 返回其分片数; 对于不分片的 measurement 返回其节点数
 func (rs *ReplicaSharder) getNumberOfShards(measurement string, replica int) int32 {
-	if _, sharded := rs.GetShardingTag(measurement); !sharded {
-		return 1
-	}
+	// if _, sharded := rs.GetShardingTag(measurement); !sharded {
+	// 	return 1
+	// }
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 	return rs.meta[measurement][replica]

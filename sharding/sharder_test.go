@@ -22,6 +22,15 @@ func (dm *dummyDM) GetManagedMeasurements() []string {
 	return dm.measurements
 }
 
+func (dm *dummyDM) IsManagedMeasurement(measurement string) bool {
+	for i := 0; i < len(dm.measurements); i++ {
+		if dm.measurements[i] == measurement {
+			return true
+		}
+	}
+	return false
+}
+
 func (dm *dummyDM) ScanTagValues(measurement string, shard int32, tagName string, fn func([]uint64) bool) error {
 	if dm.fnGetTagValues != nil {
 		tagValues, err := dm.fnGetTagValues(measurement, shard, tagName)

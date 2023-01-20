@@ -34,11 +34,18 @@ func NewManager(nodes []*backend.Backend, measurements []string) *Manager {
 	return mgr
 }
 
-func (mgr *Manager) IsManagedMeasurement(db, measurement string) bool {
-	if _, ok := mgr.dbs[db]; ok {
+func (mgr *Manager) IsManagedMeasurement(dbAndMeasurement string) bool {
+	if _, ok := mgr.measurements[dbAndMeasurement]; ok {
 		return true
+	} else if len(mgr.dbs) == 0 {
+		return false
 	}
-	_, ok := mgr.measurements[db+"."+measurement]
+
+	db, _, err := parseDbAndMeasurement(dbAndMeasurement)
+	if err != nil {
+		return false
+	}
+	_, ok := mgr.dbs[db]
 	return ok
 }
 

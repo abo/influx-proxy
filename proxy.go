@@ -81,7 +81,7 @@ func (ip *Proxy) QueryFlux(w http.ResponseWriter, req *http.Request, qr *backend
 		return backend.ErrGetBucket
 	} else if meas == "" {
 		return backend.ErrGetMeasurement
-	} else if !ip.dmgr.IsManagedMeasurement(bucket, meas) {
+	} else if !ip.dmgr.IsManagedMeasurement(bucket + "." + meas) {
 		return fmt.Errorf("measurement forbidden: %s.%s", bucket, meas)
 	}
 	// TODO 解析 flux 查询中的 shardingTag 并按其值路由
@@ -123,7 +123,7 @@ func (ip *Proxy) Query(w http.ResponseWriter, req *http.Request) (body []byte, e
 		if err != nil {
 			return nil, backend.ErrGetMeasurement
 		}
-		if !ip.dmgr.IsManagedMeasurement(db, measurement) {
+		if !ip.dmgr.IsManagedMeasurement(db + "." + measurement) {
 			return nil, fmt.Errorf("measurement forbidden: %s.%s", db, measurement)
 		}
 

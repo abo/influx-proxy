@@ -437,7 +437,7 @@ func (hs *HttpService) HandlerCleanup(w http.ResponseWriter, req *http.Request) 
 		go hs.sharder.CleanupForAll()
 		hs.WriteText(w, http.StatusAccepted, "cleanup all measurements, accepted")
 		return
-	} else if hs.dmgr.IsManagedMeasurement("", measurement) {
+	} else if hs.dmgr.IsManagedMeasurement(measurement) {
 		go hs.sharder.Cleanup(measurement)
 		hs.WriteText(w, http.StatusAccepted, "cleanup "+measurement+", accepted")
 	} else {
