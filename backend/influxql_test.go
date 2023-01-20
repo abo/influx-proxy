@@ -459,13 +459,22 @@ func BenchmarkGetRetentionPolicyFromInfluxQL(b *testing.B) {
 }
 
 func TestGetConditionFromTokens(t *testing.T) {
-	q := `SELECT mean("value") FROM mydb."autogen"."cpu" WHERE "region" = 'uswest' GROUP BY time(10m) fill(0)`
-	v, e := GetConditionFromTokens(ScanTokens(q, 0), "Region")
-	if e != nil {
-		t.Fatal(e)
+	qs := []string{
+		`SELECT mean("value") FROM mydb."autogen"."cpu" WHERE region='uswest' GROUP BY time(10m) fill(0)`,
+		`SELECT mean("value") FROM mydb."autogen"."cpu" WHERE "region"='uswest' GROUP BY time(10m) fill(0)`,
+		`SELECT mean("value") FROM mydb."autogen"."cpu" WHERE "region" ='uswest' GROUP BY time(10m) fill(0)`,
+		`SELECT mean("value") FROM mydb."autogen"."cpu" WHERE region= 'uswest' GROUP BY time(10m) fill(0)`,
+		`SELECT mean("value") FROM mydb."autogen"."cpu" WHERE region = 'uswest' GROUP BY time(10m) fill(0)`,
 	}
-	if v != "uswest" {
-		t.Fatal("got ", v)
+
+	for _, q := range qs {
+		v, e := GetConditionFromTokens(ScanTokens(q, 0), "Region")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if v != "uswest" {
+			t.Fatal("got ", v)
+		}
 	}
 }
 

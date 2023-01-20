@@ -282,20 +282,34 @@ func GetConditionFromTokens(tokens []string, field string) (val string, err erro
 	field = strings.ToLower(field)
 	return GetIdentifierFromTokens(tokens, []string{"where"}, func(conditions []string, where string) string {
 		for i := 0; i < len(conditions); i++ {
-			v := conditions[i]
-			if v[0] == '"' || v[0] == '\'' {
-				v = v[1 : len(v)-1]
+			start := strings.ToLower(unquote(conditions[i]))
+
+			if !strings.HasPrefix(start, field) {
+				continue
 			}
-			v = strings.ToLower(v)
-			if v == field && (i+2 < len(conditions)) && conditions[i+1] == "=" {
-				val = conditions[i+2]
-				if val[0] == '"' || val[0] == '\'' {
-					return val[1 : len(val)-1]
+			start = start[len(field):]
+
+			if start == "" {
+				if conditions[i+1] == "=" {
+					return unquote(conditions[i+2])
+				} else if conditions[i+1][0] == '=' {
+					return unquote(conditions[i+1][1:])
 				}
+			} else if start == "=" {
+				return unquote(conditions[i+1])
+			} else if strings.HasPrefix(start, "=") {
+				return unquote(start[1:])
 			}
 		}
 		return ""
 	})
+}
+
+func unquote(str string) string {
+	if str[0] == '"' || str[0] == '\'' {
+		return str[1 : len(str)-1]
+	}
+	return str
 }
 
 func GetIdentifierFromTokens(tokens []string, keywords []string, fn func([]string, string) string) (string, error) {
@@ -325,10 +339,7 @@ func getDatabase(tokens []string, keyword string) (db string) {
 			return ""
 		}
 	}
-	if db[0] == '"' || db[0] == '\'' {
-		db = db[1 : len(db)-1]
-	}
-	return
+	return unquote(db)
 }
 
 func getRetentionPolicy(tokens []string, keyword string) (rp string) {
@@ -351,10 +362,7 @@ func getRetentionPolicy(tokens []string, keyword string) (rp string) {
 	} else {
 		return
 	}
-	if rp[0] == '"' || rp[0] == '\'' {
-		rp = rp[1 : len(rp)-1]
-	}
-	return
+	return unquote(rp)
 }
 
 func getMeasurement(tokens []string, keyword string) (mm string) {
@@ -380,10 +388,7 @@ func getMeasurement(tokens []string, keyword string) (mm string) {
 	} else {
 		mm = tokens[0]
 	}
-	if mm[0] == '"' || mm[0] == '\'' {
-		mm = mm[1 : len(mm)-1]
-	}
-	return
+	return unquote(mm)
 }
 
 func CheckQuery(q string) (tokens []string, check bool, from bool) {
