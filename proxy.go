@@ -131,8 +131,11 @@ func (ip *Proxy) Query(w http.ResponseWriter, req *http.Request) (body []byte, e
 			return parseTagValueFromQuery(tagName, tokens)
 		}); err == nil {
 			return backend.QueryFromQL(w, req, nodes)
-		} else { // 如果不能解析 shardingTag, 请求发送到所有分片, 例如 show tag values from meas
+		} else if backend.CheckShowFromTokens(tokens) {
+			// 如果不能解析 shardingTag, 对于 show xxx 请求发送到所有分片, 例如 show tag values from meas
 			return backend.QueryShowQL(w, req, ip.GetAllBackends(), tokens)
+		} else {
+			return nil, backend.ErrShardingTagNotFound
 		}
 	} else if selectOrShow && !from {
 		return backend.QueryShowQL(w, req, ip.GetAllBackends(), tokens)

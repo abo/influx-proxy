@@ -452,6 +452,10 @@ func CheckSelectOrShowFromTokens(tokens []string) (check bool) {
 	return
 }
 
+func CheckShowFromTokens(tokens []string) (check bool) {
+	return strings.ToLower(tokens[0]) == "show"
+}
+
 func CheckDeleteOrDropMeasurementFromTokens(tokens []string) (check bool) {
 	if len(tokens) >= 3 {
 		stmt := GetHeadStmtFromTokens(tokens, 2)
