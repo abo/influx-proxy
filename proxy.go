@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -30,17 +29,17 @@ func NewProxy(cfg *backend.Config, nodes []*backend.Backend, dmgr *dm.Manager, s
 	return &Proxy{nodes: nodes, dmgr: dmgr, sharder: sharder}
 }
 
-func (proxy *Proxy) GetAllocatedNodes(database, measurement string, parseTag ...func(tagName string) (uint64, error)) ([]*backend.Backend, error) {
+func (proxy *Proxy) GetAllocatedNodes(database, measurement string, parseTag ...func(tagName string) (string, error)) ([]*backend.Backend, error) {
 	var shards []int
 	if shardingTagName, sharded := proxy.sharder.GetShardingTag(database + "." + measurement); !sharded {
-		shards = proxy.sharder.GetAllocatedShards(database+"."+measurement, 0)
+		shards = proxy.sharder.GetAllocatedShards(database+"."+measurement, "")
 	} else if len(parseTag) == 0 {
 		return proxy.nodes, nil
 	} else if key, err := parseTag[0](shardingTagName); err != nil {
 		return nil, err // TODO wrap with no shardingTag
 	} else {
 		shards = proxy.sharder.GetAllocatedShards(database+"."+measurement, key)
-		log.Debugf("%s.%s.%d allocated at %v", database, measurement, key, shards)
+		log.Debugf("%s.%s.%s allocated at %v", database, measurement, key, shards)
 	}
 	nodes := make([]*backend.Backend, len(shards))
 	for i, shard := range shards {
@@ -127,7 +126,7 @@ func (ip *Proxy) Query(w http.ResponseWriter, req *http.Request) (body []byte, e
 			return nil, fmt.Errorf("measurement forbidden: %s.%s", db, measurement)
 		}
 
-		if nodes, err := ip.GetAllocatedNodes(db, measurement, func(tagName string) (uint64, error) {
+		if nodes, err := ip.GetAllocatedNodes(db, measurement, func(tagName string) (string, error) {
 			return parseTagValueFromQuery(tagName, tokens)
 		}); err == nil {
 			return backend.QueryFromQL(w, req, nodes)
@@ -146,7 +145,7 @@ func (ip *Proxy) Query(w http.ResponseWriter, req *http.Request) (body []byte, e
 		if err != nil {
 			return nil, err
 		}
-		if nodes, err := ip.GetAllocatedNodes(db, measurement, func(tagName string) (uint64, error) {
+		if nodes, err := ip.GetAllocatedNodes(db, measurement, func(tagName string) (string, error) {
 			return parseTagValueFromQuery(tagName, tokens)
 		}); err == nil {
 			return backend.QueryAll(req, w, nodes)
@@ -198,7 +197,7 @@ func (ip *Proxy) WriteRow(line []byte, db, rp, precision string) {
 		return
 	}
 
-	backends, err := ip.GetAllocatedNodes(db, measurement, func(tagName string) (uint64, error) {
+	backends, err := ip.GetAllocatedNodes(db, measurement, func(tagName string) (string, error) {
 		return parseTagValueFromLine(tagName, nanoLine)
 	})
 	if err != nil || len(backends) == 0 {
@@ -215,23 +214,23 @@ func (ip *Proxy) WriteRow(line []byte, db, rp, precision string) {
 	}
 }
 
-func parseTagValueFromQuery(tagName string, tokens []string) (uint64, error) {
+func parseTagValueFromQuery(tagName string, tokens []string) (string, error) {
 	shardingTagValue, err := backend.GetConditionFromTokens(tokens, tagName)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return strconv.ParseUint(shardingTagValue, 10, 64)
+	return shardingTagValue, nil
 }
 
-func parseTagValueFromLine(tagName string, line []byte) (uint64, error) {
+func parseTagValueFromLine(tagName string, line []byte) (string, error) {
 	shardingTagValue, err := backend.ScanTagValue(line, tagName)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return strconv.ParseUint(shardingTagValue, 10, 64)
+	return shardingTagValue, nil
 }
 
-func parseTagValueFromPoint(tagName string, point models.Point) (uint64, error) {
+func parseTagValueFromPoint(tagName string, point models.Point) (string, error) {
 	exists := false
 	var shardingTagValue string
 	point.ForEachTag(func(k, v []byte) bool {
@@ -243,16 +242,16 @@ func parseTagValueFromPoint(tagName string, point models.Point) (uint64, error) 
 		return true
 	})
 	if !exists {
-		return 0, backend.ErrShardingTagNotFound
+		return "", backend.ErrShardingTagNotFound
 	}
-	return strconv.ParseUint(shardingTagValue, 10, 64)
+	return shardingTagValue, nil
 }
 
 func (ip *Proxy) WritePoints(points []models.Point, db, rp string) error {
 	var err error
 	for _, pt := range points {
 		meas := string(pt.Name())
-		backends, err := ip.GetAllocatedNodes(db, meas, func(tagName string) (uint64, error) {
+		backends, err := ip.GetAllocatedNodes(db, meas, func(tagName string) (string, error) {
 			return parseTagValueFromPoint(tagName, pt)
 		})
 		if err != nil || len(backends) == 0 {

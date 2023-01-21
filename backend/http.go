@@ -482,8 +482,8 @@ func (hb *HttpBackend) DropMeasurement(db, meas string) ([]byte, error) {
 	return qr.Body, qr.Err
 }
 
-func (hb *HttpBackend) DropSeries(db, meas, tag string, tagVal uint64) ([]byte, error) {
-	q := fmt.Sprintf("drop series from \"%s\" where %s='%d'", util.EscapeIdentifier(meas), tag, tagVal)
+func (hb *HttpBackend) DropSeries(db, meas, tag string, tagVal string) ([]byte, error) {
+	q := fmt.Sprintf("drop series from \"%s\" where %s='%s'", util.EscapeIdentifier(meas), tag, tagVal)
 	qr := hb.Query(NewQueryRequest("POST", db, q, ""), nil, true)
 	return qr.Body, qr.Err
 }

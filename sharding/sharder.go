@@ -25,14 +25,13 @@ type DataManager interface {
 	IsManagedMeasurement(dbAndMeasurement string) bool
 
 	// 扫描指定节点的原始数据，获取所有 shardingTag 值
-	ScanTagValues(dbAndMeasurement string, shard int32, shardingTag string, fn func([]uint64) bool) error
-	// ScanShardingTagValues(shard int32, measurement string) []uint64
+	ScanTagValues(dbAndMeasurement string, shard int32, shardingTag string, fn func([]string) bool) error
 
 	// 将 measurement 中 shardingTagValue 对应的所有原始数据，从 srcShard 迁移到 destShards
-	CopySeries(dbAndMeasurement string, srcShard int32, destShards []int32, shardingTag string, tagValue uint64) error
+	CopySeries(dbAndMeasurement string, srcShard int32, destShards []int32, shardingTag string, tagValue string) error
 
 	//
-	RemoveSeries(dbAndMeasurement string, shard int32, shardingTag string, tagValue uint64) error
+	RemoveSeries(dbAndMeasurement string, shard int32, shardingTag string, tagValue string) error
 
 	// 从 srcNode 中将指定 Measurement 整体复制到 destNode
 	CopyMeasurement(srcNode int32, destNodes []int32, dbAndMeasurement string) error
@@ -117,9 +116,6 @@ func (rs *ReplicaSharder) getNumberOfReplicas(measurement string) int {
 
 // 对于分片的 measurement 返回其分片数; 对于不分片的 measurement 返回其节点数
 func (rs *ReplicaSharder) getNumberOfShards(measurement string, replica int) int32 {
-	// if _, sharded := rs.GetShardingTag(measurement); !sharded {
-	// 	return 1
-	// }
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
 	return rs.meta[measurement][replica]
@@ -202,9 +198,9 @@ func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int
 	if tagName, sharded := rs.GetShardingTag(measurement); sharded {
 		// 对于已分片的 measurement, 由于数据分散在多个节点, 从第一个 replica 的各个 shard 复制数据
 		for shard := int32(0); shard < shards; shard++ {
-			err = multierr.Append(err, rs.dmgr.ScanTagValues(measurement, shard, tagName, func(tagValues []uint64) bool {
+			err = multierr.Append(err, rs.dmgr.ScanTagValues(measurement, shard, tagName, func(tagValues []string) bool {
 				for _, tagValue := range tagValues {
-					destShards := jumpHashForReplica(tagValue, numberOfReplicas-1, shards)
+					destShards := jumpHashForReplica(str2key(tagValue), numberOfReplicas-1, shards)
 					err = multierr.Append(err, rs.dmgr.CopySeries(measurement, shard, destShards[originReplicas:], tagName, tagValue))
 				}
 				return false
@@ -262,15 +258,15 @@ func (rs *ReplicaSharder) Rebalance(measurement string, replica int) error {
 		go func(shard int32) {
 			var shardErr error
 			if sharded { // 对于已分片的, 检查并移动 series
-				shardErr = rs.scanSeries(measurement, shard, func(measurement string, shard int32, shardingTag string, tagValue uint64) error {
-					destShard := jumpHashForReplica(tagValue, replica, numberOfShards)
-					log.Debugf("move series %s.%d from %d to %v", measurement, tagValue, shard, destShard[replica:])
+				shardErr = rs.scanSeries(measurement, shard, func(measurement string, shard int32, shardingTag string, tagValue string) error {
+					destShard := jumpHashForReplica(str2key(tagValue), replica, numberOfShards)
+					log.Debugf("move series %s.%s from %d to %v", measurement, tagValue, shard, destShard[replica:])
 					if e := rs.dmgr.CopySeries(measurement, shard, destShard[replica:], shardingTag, tagValue); e != nil {
 						return e
 					}
 					return rs.dmgr.RemoveSeries(measurement, shard, shardingTag, tagValue)
 				})
-			} else if rs.isDirty(measurement, shard, 0) {
+			} else if rs.isDirty(measurement, shard, "") {
 				// 对于未分片的, 检查并移动 measurement
 				destShard := jumpHashForReplica(str2key(measurement), replica, numberOfShards)
 				log.Debugf("move measurement %s from %d to %v", measurement, shard, destShard[replica:])
@@ -321,16 +317,16 @@ func (rs *ReplicaSharder) Cleanup(measurement string) error {
 	for shard := int32(0); shard < numberOfShards; shard++ {
 		if sharded {
 			err = multierr.Append(err, rs.scanSeries(measurement, shard, rs.dmgr.RemoveSeries))
-		} else if rs.isDirty(measurement, shard, 0) {
+		} else if rs.isDirty(measurement, shard, "") {
 			err = multierr.Append(err, rs.dmgr.RemoveMeasurement(shard, measurement))
 		}
 	}
 	return err
 }
 
-func (rs *ReplicaSharder) scanSeries(measurement string, shard int32, fn func(string, int32, string, uint64) error) error {
+func (rs *ReplicaSharder) scanSeries(measurement string, shard int32, fn func(string, int32, string, string) error) error {
 	var err error
-	err = multierr.Append(err, rs.dmgr.ScanTagValues(measurement, shard, rs.shardingTag[measurement], func(tagValues []uint64) bool {
+	err = multierr.Append(err, rs.dmgr.ScanTagValues(measurement, shard, rs.shardingTag[measurement], func(tagValues []string) bool {
 		for _, tagValue := range tagValues {
 			if rs.isDirty(measurement, shard, tagValue) {
 				err = multierr.Append(err, fn(measurement, shard, rs.shardingTag[measurement], tagValue))
@@ -344,13 +340,13 @@ func (rs *ReplicaSharder) scanSeries(measurement string, shard int32, fn func(st
 }
 
 // 如果 measurement 的所有 replica 下, 都不应该分配到 shard 上, 则可以判断是一份脏数据, 需要迁移或删除
-func (rs *ReplicaSharder) isDirty(measurement string, shard int32, shardingTagValue uint64) bool {
+func (rs *ReplicaSharder) isDirty(measurement string, shard int32, shardingTagValue string) bool {
 	if _, sharded := rs.GetShardingTag(measurement); !sharded {
-		shardingTagValue = str2key(measurement)
+		shardingTagValue = measurement
 	}
 
 	for i := 0; i < rs.getNumberOfReplicas(measurement); i++ {
-		if int32(shard) == jumpHashForReplica(shardingTagValue, i, rs.getNumberOfShards(measurement, i))[i] {
+		if int32(shard) == jumpHashForReplica(str2key(shardingTagValue), i, rs.getNumberOfShards(measurement, i))[i] {
 			return false
 		}
 	}
@@ -365,17 +361,17 @@ func (rs *ReplicaSharder) isRebalancing(measurement string, replica int) bool {
 
 // 获取指定 shardingTag 数据的所有分片位置, 并按是否在 rebalancing 排序, 调用者可以优先查询稳定的分片
 // TODO preferred
-func (rs *ReplicaSharder) GetAllocatedShards(measurement string, shardingTagValue uint64) []int {
+func (rs *ReplicaSharder) GetAllocatedShards(measurement string, shardingTagValue string) []int {
 	replicas := rand.Perm(rs.getNumberOfReplicas(measurement)) // replica 的顺序随机, 从而达到负载均衡读
 	sort.Slice(replicas, func(i, j int) bool {
 		return !rs.isRebalancing(measurement, replicas[i]) && rs.isRebalancing(measurement, replicas[j])
 	})
 	shards := make([]int, len(replicas)) // 计算各个 replica 中, shardingTagValue 对应的分片/节点位置
 	if _, sharded := rs.GetShardingTag(measurement); !sharded {
-		shardingTagValue = str2key(measurement)
+		shardingTagValue = measurement
 	}
 	for i, replica := range replicas {
-		shards[i] = int(jumpHashForReplica(shardingTagValue, replica, rs.getNumberOfShards(measurement, replica))[replica])
+		shards[i] = int(jumpHashForReplica(str2key(shardingTagValue), replica, rs.getNumberOfShards(measurement, replica))[replica])
 	}
 	return shards
 }

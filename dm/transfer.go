@@ -239,7 +239,7 @@ func (tx *Transfer) CopyMeasurement(src *backend.Backend, dsts []*backend.Backen
 	return err
 }
 
-func (tx *Transfer) CopySeries(src *backend.Backend, dsts []*backend.Backend, db, measurement, tag string, tagVal uint64) error {
+func (tx *Transfer) CopySeries(src *backend.Backend, dsts []*backend.Backend, db, measurement, tag string, tagVal string) error {
 	var err error
 	rps := src.GetRetentionPolicies(db)
 	for _, rp := range rps {

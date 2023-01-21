@@ -2,7 +2,6 @@ package dm
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -89,7 +88,7 @@ func parseDbAndMeasurement(dbAndMeasurement string) (db, measurement string, err
 }
 
 // 扫描指定节点的原始数据，获取所有 shardingTag 值
-func (mgr *Manager) ScanTagValues(dbAndMeasurement string, shard int32, tagName string, fn func([]uint64) bool) error {
+func (mgr *Manager) ScanTagValues(dbAndMeasurement string, shard int32, tagName string, fn func([]string) bool) error {
 	db, measurement, err := parseDbAndMeasurement(dbAndMeasurement)
 	if err != nil {
 		return err
@@ -101,13 +100,7 @@ func (mgr *Manager) ScanTagValues(dbAndMeasurement string, shard int32, tagName 
 		if len(strvals) == 0 {
 			break
 		}
-		results := make([]uint64, 0, len(strvals))
-		for _, strval := range strvals {
-			if val, err := strconv.ParseUint(strval, 10, 64); err == nil {
-				results = append(results, val)
-			}
-		}
-		if fn(results) {
+		if fn(strvals) {
 			break
 		}
 	}
@@ -116,7 +109,7 @@ func (mgr *Manager) ScanTagValues(dbAndMeasurement string, shard int32, tagName 
 }
 
 // 将 measurement 中 shardingTagValue 对应的所有原始数据，从 srcShard 迁移到 destShard
-func (mgr *Manager) CopySeries(dbAndMeasurement string, src int32, dest []int32, tagName string, tagValue uint64) error {
+func (mgr *Manager) CopySeries(dbAndMeasurement string, src int32, dest []int32, tagName string, tagValue string) error {
 	srcNode := mgr.nodes[src]
 	destNodes := make([]*backend.Backend, 0, len(dest))
 	for _, n := range dest {
@@ -133,7 +126,7 @@ func (mgr *Manager) CopySeries(dbAndMeasurement string, src int32, dest []int32,
 	return mgr.transfer.CopySeries(srcNode, destNodes, db, measurement, tagName, tagValue)
 }
 
-func (mgr *Manager) RemoveSeries(dbAndMeasurement string, shard int32, tagName string, tagValue uint64) error {
+func (mgr *Manager) RemoveSeries(dbAndMeasurement string, shard int32, tagName string, tagValue string) error {
 	db, measurement, err := parseDbAndMeasurement(dbAndMeasurement)
 	if err != nil {
 		return fmt.Errorf("cannot remove series: %w", err)
