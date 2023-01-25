@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/abo/influx-proxy/backend"
 	"github.com/abo/influx-proxy/dm"
@@ -33,6 +32,7 @@ func (proxy *Proxy) GetAllocatedNodes(database, measurement string, parseTag ...
 	var shards []int
 	if shardingTagName, sharded := proxy.sharder.GetShardingTag(database + "." + measurement); !sharded {
 		shards = proxy.sharder.GetAllocatedShards(database+"."+measurement, "")
+		log.Debugf("%s.%s allocated at %v", database, measurement, shards)
 	} else if len(parseTag) == 0 {
 		return proxy.nodes, nil
 	} else if key, err := parseTag[0](shardingTagName); err != nil {
@@ -50,20 +50,6 @@ func (proxy *Proxy) GetAllocatedNodes(database, measurement string, parseTag ...
 
 func (ip *Proxy) GetAllBackends() []*backend.Backend {
 	return ip.nodes
-}
-
-func (ip *Proxy) GetHealth(stats bool) []interface{} {
-	var wg sync.WaitGroup
-	health := make([]interface{}, len(ip.nodes))
-	for i, n := range ip.nodes {
-		wg.Add(1)
-		go func(i int, node *backend.Backend) {
-			defer wg.Done()
-			health[i] = node.GetHealth(stats)
-		}(i, n)
-	}
-	wg.Wait()
-	return health
 }
 
 func (ip *Proxy) QueryFlux(w http.ResponseWriter, req *http.Request, qr *backend.QueryRequest) (err error) {

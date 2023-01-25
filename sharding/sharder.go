@@ -122,12 +122,17 @@ func (rs *ReplicaSharder) getNumberOfShards(measurement string, replica int) int
 }
 
 // 对所有 measurement 的所有 replica, 调整分片数并执行 rebalance
+// TODO 如果是 2 shard 2 replica, 其实只要在一个节点上执行就够了，因为任一节点有完整数据；推而广之 shards == replicas 时，任一节点有完整数据
+// 或者使用一个hashmap 或 bloom filter 记录 ?
 func (rs *ReplicaSharder) Scale(numberOfShards int) error {
+	log.Infof("start scale to %d shard(s)", numberOfShards)
+	rs.defaultNumberOfShards = numberOfShards
 	var err error
 	var wg sync.WaitGroup
 	for _, measurement := range rs.dmgr.GetManagedMeasurements() {
 		wg.Add(1)
 		go func(m string) {
+			defer wg.Done()
 			if _, sharded := rs.GetShardingTag(m); !sharded {
 				return
 			}
@@ -140,21 +145,23 @@ func (rs *ReplicaSharder) Scale(numberOfShards int) error {
 				rs.mu.Unlock()
 				err = multierr.Append(err, rs.Rebalance(m, replica))
 			}
-			wg.Done()
 		}(measurement)
 
 	}
 	wg.Wait()
+	log.Infof("scale done, target: %d shard(s), err: %v", numberOfShards, err)
 	return err
 }
 
 // 调整复制数, 跨 replica 复制数据
 func (rs *ReplicaSharder) Replicate(numberOfReplicas int) error {
+	rs.defaultNumberOfReplicas = numberOfReplicas
 	var err error
 	var wg sync.WaitGroup
 	for _, measurement := range rs.dmgr.GetManagedMeasurements() {
 		wg.Add(1)
 		go func(m string) {
+			defer wg.Done()
 			currentReplicas := rs.getNumberOfReplicas(m)
 			if currentReplicas == numberOfReplicas {
 				return
@@ -163,8 +170,6 @@ func (rs *ReplicaSharder) Replicate(numberOfReplicas int) error {
 			} else {
 				err = multierr.Append(err, rs.expandReplica(m, numberOfReplicas))
 			}
-
-			wg.Done()
 		}(measurement)
 	}
 	wg.Wait()
@@ -173,6 +178,7 @@ func (rs *ReplicaSharder) Replicate(numberOfReplicas int) error {
 
 // 删除多余的 replica, 仅保留 numberOfReplicas 个
 func (rs *ReplicaSharder) shrinkReplica(measurement string, numberOfReplicas int) error {
+	log.Infof("shrink %s to %d replica(s)", measurement, numberOfReplicas)
 	// 删除元数据并清理原始数据
 	rs.mu.Lock()
 	rs.meta[measurement] = rs.meta[measurement][:numberOfReplicas]
@@ -184,11 +190,11 @@ func (rs *ReplicaSharder) shrinkReplica(measurement string, numberOfReplicas int
 
 // 增加更多 replica
 func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int) error {
-	shards := rs.getNumberOfShards(measurement, 0) // 分片数与第一个 replica 保持相同
+	log.Infof("expand %s to %d replica(s)", measurement, numberOfReplicas)
 	rs.mu.Lock()
 	originReplicas := len(rs.meta[measurement])
 	for len(rs.meta[measurement]) < numberOfReplicas {
-		rs.meta[measurement] = append(rs.meta[measurement], shards)
+		rs.meta[measurement] = append(rs.meta[measurement], int32(rs.defaultNumberOfShards))
 		rs.state[measurement] = append(rs.state[measurement], rebalancing)
 	}
 	rs.mu.Unlock()
@@ -197,10 +203,10 @@ func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int
 
 	if tagName, sharded := rs.GetShardingTag(measurement); sharded {
 		// 对于已分片的 measurement, 由于数据分散在多个节点, 从第一个 replica 的各个 shard 复制数据
-		for shard := int32(0); shard < shards; shard++ {
+		for shard := int32(0); shard < rs.getNumberOfShards(measurement, 0); shard++ {
 			err = multierr.Append(err, rs.dmgr.ScanTagValues(measurement, shard, tagName, func(tagValues []string) bool {
 				for _, tagValue := range tagValues {
-					destShards := jumpHashForReplica(str2key(tagValue), numberOfReplicas-1, shards)
+					destShards := jumpHashForReplica(str2key(tagValue), numberOfReplicas-1, int32(rs.defaultNumberOfShards))
 					err = multierr.Append(err, rs.dmgr.CopySeries(measurement, shard, destShards[originReplicas:], tagName, tagValue))
 				}
 				return false
@@ -208,7 +214,7 @@ func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int
 		}
 	} else {
 		// 对于未分片的整体复制
-		destNodes := jumpHashForReplica(str2key(measurement), numberOfReplicas-1, shards)
+		destNodes := jumpHashForReplica(str2key(measurement), numberOfReplicas-1, int32(rs.defaultNumberOfShards))
 		err = multierr.Append(err, rs.dmgr.CopyMeasurement(destNodes[0], destNodes[originReplicas:], measurement))
 	}
 
@@ -218,6 +224,79 @@ func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int
 	}
 	rs.mu.Unlock()
 	return err
+}
+
+// 修复指定分片中的数据
+func (rs *ReplicaSharder) Repair(brokenShard int) error {
+	log.Infof("start repair broken shard %d", brokenShard)
+	var err error
+	for _, measurement := range rs.dmgr.GetManagedMeasurements() {
+		if _, sharded := rs.GetShardingTag(measurement); sharded {
+			err = multierr.Append(err, rs.repairShardedMeasurement(measurement, int32(brokenShard)))
+		} else {
+			err = multierr.Append(err, rs.repairUnshardedMeasurement(measurement, int32(brokenShard)))
+		}
+	}
+	log.Infof("repair done, err: %v", err)
+	return err
+}
+
+func (rs *ReplicaSharder) repairShardedMeasurement(measurement string, brokenShard int32) error {
+	var err error
+	replicas := rs.getNumberOfReplicas(measurement)
+	shardingTag, _ := rs.GetShardingTag(measurement)
+	log.Infof("check %s (sharded) for repair %d, replicas: %d", measurement, brokenShard, replicas)
+	// 每个 measurement 只要选择 2 个 replica 就能恢复该 measurement 在 shard 上的完整数据
+	for i := 0; i < replicas && i < 2; i++ {
+		shards := rs.getNumberOfShards(measurement, i)
+		for shard := int32(0); shard < shards; shard++ {
+			if shard == brokenShard {
+				continue
+			}
+			log.Infof("repaire %s in %d, scan series at %d", measurement, brokenShard, shard)
+			err = multierr.Append(err, rs.dmgr.ScanTagValues(measurement, shard, shardingTag, func(tagValues []string) bool {
+				for _, tagValue := range tagValues {
+					knownNeedRepair := false
+					// 是否有某个 replica 下, 该数据分片到 brokenShard
+					for j := 0; j < replicas && !knownNeedRepair; j++ {
+						if j == i {
+							continue
+						}
+						destShard := jumpHashForReplica(str2key(tagValue), j, rs.getNumberOfShards(measurement, j))
+						knownNeedRepair = destShard[j] == brokenShard
+					}
+					if knownNeedRepair {
+						log.Debugf("repair %s.%s in %d, copy series from %d", measurement, tagValue, brokenShard, shard)
+						err = multierr.Append(err, rs.dmgr.CopySeries(measurement, shard, []int32{brokenShard}, shardingTag, tagValue))
+					}
+				}
+				return false
+			}))
+		}
+	}
+	return err
+}
+
+func (rs *ReplicaSharder) repairUnshardedMeasurement(measurement string, brokenShard int32) error {
+	replicas := rs.getNumberOfReplicas(measurement)
+	log.Infof("check %s (unsharded) for repair %d, replicas: %d", measurement, brokenShard, replicas)
+	knownNeedRepair := false
+	from := int32(-1)
+	// 计算是否该 measurement 的某 replica 在 brokenShard 上
+	for i := 0; i < replicas && (!knownNeedRepair || from == -1); i++ {
+		shard := jumpHashForReplica(str2key(measurement), i, rs.getNumberOfShards(measurement, i))[i]
+		if shard == int32(brokenShard) {
+			knownNeedRepair = true
+		} else {
+			from = shard
+		}
+	}
+
+	if knownNeedRepair && from != -1 {
+		log.Infof("repair %s in %d, copy measurement from %d", measurement, brokenShard, from)
+		return rs.dmgr.CopyMeasurement(from, []int32{int32(brokenShard)}, measurement)
+	}
+	return nil
 }
 
 func (rs *ReplicaSharder) RebalanceForAll() error {
@@ -306,6 +385,7 @@ func (rs *ReplicaSharder) CleanupForAll() error {
 
 // 清理位置不正确的 measurement（未分片） 或 series（已分片）
 func (rs *ReplicaSharder) Cleanup(measurement string) error {
+	log.Infof("start cleanup for %s", measurement)
 	numberOfShards := int32(0) // 最大分片数，也就是节点数
 	for replica := 0; replica < rs.getNumberOfReplicas(measurement); replica++ {
 		if numberOfShards < rs.getNumberOfShards(measurement, replica) {
@@ -315,12 +395,14 @@ func (rs *ReplicaSharder) Cleanup(measurement string) error {
 	_, sharded := rs.GetShardingTag(measurement)
 	var err error
 	for shard := int32(0); shard < numberOfShards; shard++ {
+		log.Infof("cleanup %s (sharded=%v) from %d", measurement, sharded, shard)
 		if sharded {
 			err = multierr.Append(err, rs.scanSeries(measurement, shard, rs.dmgr.RemoveSeries))
 		} else if rs.isDirty(measurement, shard, "") {
 			err = multierr.Append(err, rs.dmgr.RemoveMeasurement(shard, measurement))
 		}
 	}
+	log.Infof("cleanup done, err: %v", err)
 	return err
 }
 

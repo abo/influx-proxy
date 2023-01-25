@@ -39,12 +39,12 @@ var (
 )
 
 type HttpService struct { // nolint:golint
-	proxy       *influxproxy.Proxy
-	dmgr        *dm.Manager
-	sharder     *sharding.ReplicaSharder
-	username    string
-	password    string
-	authEncrypt bool
+	nodes   []*backend.Backend
+	proxy   *influxproxy.Proxy
+	dmgr    *dm.Manager
+	sharder *sharding.ReplicaSharder
+	cfg     *backend.Config
+
 	// writeTracing bool
 	// queryTracing bool
 }
@@ -57,18 +57,15 @@ func NewHttpService(cfg *backend.Config) (hs *HttpService) { // nolint:golint
 
 	dmgr := dm.NewManager(nodes, cfg.Proxy.Measurements)
 	sharder := sharding.NewSharder(dmgr, cfg.Sharding)
-	sharder.Init(len(nodes), 1) // TODO  by legacy config
-	ip := influxproxy.NewProxy(cfg, nodes, dmgr, sharder)
+	sharder.Init(len(nodes), 1)                              // TODO  by legacy config
+	proxy := influxproxy.NewProxy(cfg, nodes, dmgr, sharder) //cfg.Proxy.WriteTracing,  //cfg.Proxy.QueryTracing,
 
 	return &HttpService{
-		proxy:       ip,
-		dmgr:        dmgr,
-		sharder:     sharder,
-		username:    cfg.Proxy.Username,
-		password:    cfg.Proxy.Password,
-		authEncrypt: cfg.Proxy.AuthEncrypt,
-		// writeTracing: true, //cfg.Proxy.WriteTracing,
-		// queryTracing: true, //cfg.Proxy.QueryTracing,
+		nodes:   nodes,
+		proxy:   proxy,
+		dmgr:    dmgr,
+		sharder: sharder,
+		cfg:     cfg,
 	}
 }
 
@@ -95,20 +92,14 @@ func (hs *HttpService) Handler() http.Handler {
 	r.HandleFunc("/health", hs.HandlerHealth)
 	r.HandleFunc("/encrypt", hs.HandlerEncrypt)
 	r.HandleFunc("/decrypt", hs.HandlerDecrypt)
-	// r.HandleFunc("/replica", hs.HandlerReplica)
-	r.HandleFunc("/rebalance", hs.HandlerRebalance)
-	// r.HandleFunc("/recovery", hs.HandlerRecovery)
-	// r.HandleFunc("/resync", hs.HandlerResync)
-	// r.HandleFunc("/cleanup", hs.HandlerCleanup)
-	// r.HandleFunc("/transfer/state", hs.HandlerTransferState)
-	// r.HandleFunc("/transfer/stats", hs.HandlerTransferStats)
-
-	// TODO mgmt api
-	// scale 添加/删除节点
-	// replicate 调整备份数
-	// repair 修复某些 replica 的数据
-	// cleanup 清理位置不正确的数据
-	// state
+	r.HandleFunc("/rebalance", hs.HandlerRebalance) // 数据再均衡
+	r.HandleFunc("/scale", hs.HandlerScale)         // 添加/删除节点, 并同时调整分片数以及再均衡
+	r.HandleFunc("/replicate", hs.HandlerReplicate) // 调整备份数
+	r.HandleFunc("/repair", hs.HandlerRepair)       // 修复指定节点的数据
+	r.HandleFunc("/replace", hs.HandlerReplace)     // 替换节点
+	r.HandleFunc("/cleanup", hs.HandlerCleanup)     // 清理位置不正确的数据
+	r.HandleFunc("/state", hs.HandlerState)         // 当前状态
+	r.HandleFunc("/stats", hs.HandlerStats)         // 数据分布统计
 
 	// debug
 	r.HandleFunc("/debug/pprof/{name}", func(resp http.ResponseWriter, req *http.Request) {
@@ -273,184 +264,6 @@ func (hs *HttpService) writeInternal(db, rp, precision string, w http.ResponseWr
 	log.Debugf("write line protocol, db: %s, rp: %s, precision: %s, data: %s, client: %s", db, rp, precision, p, req.RemoteAddr)
 }
 
-func (hs *HttpService) HandlerHealth(w http.ResponseWriter, req *http.Request) {
-
-	if !hs.checkMethodAndAuth(w, req, "GET") {
-		return
-	}
-	stats := req.URL.Query().Get("stats") == "true"
-	resp := map[string]interface{}{
-		"name":    "influx-proxy",
-		"message": "ready for queries and writes",
-		"status":  "ok",
-		"checks":  []string{},
-		"circles": hs.proxy.GetHealth(stats),
-		"version": backend.Version,
-	}
-	hs.Write(w, req, http.StatusOK, resp)
-}
-
-func (hs *HttpService) HandlerEncrypt(w http.ResponseWriter, req *http.Request) {
-	if !hs.checkMethod(w, req, "GET") {
-		return
-	}
-	text := req.URL.Query().Get("text")
-	encrypt := util.AesEncrypt(text)
-	hs.WriteText(w, http.StatusOK, encrypt)
-}
-
-func (hs *HttpService) HandlerDecrypt(w http.ResponseWriter, req *http.Request) {
-	if !hs.checkMethod(w, req, "GET") {
-		return
-	}
-	key := req.URL.Query().Get("key")
-	text := req.URL.Query().Get("text")
-	if !util.CheckCipherKey(key) {
-		hs.WriteError(w, req, http.StatusBadRequest, "invalid key")
-		return
-	}
-	decrypt := util.AesDecrypt(text)
-	hs.WriteText(w, http.StatusOK, decrypt)
-}
-
-// func (hs *HttpService) HandlerReplica(w http.ResponseWriter, req *http.Request) {
-// 	if !hs.checkMethodAndAuth(w, req, "GET") {
-// 		return
-// 	}
-
-// 	db := req.URL.Query().Get("db")
-// 	meas := req.URL.Query().Get("meas")
-// 	if db != "" && meas != "" {
-// 		backends, err := hs.proxy.GetAllocatedNodes(db, meas)
-// 		data := make([]map[string]interface{}, len(backends))
-// 		for i, b := range backends {
-// 			c := hs.proxy.Circles[i]
-// 			data[i] = map[string]interface{}{
-// 				"backend": map[string]string{"name": b.Name, "url": b.Url},
-// 				"circle":  map[string]interface{}{"id": c.CircleId, "name": c.Name},
-// 			}
-// 		}
-// 		hs.Write(w, req, http.StatusOK, data)
-// 	} else {
-// 		hs.WriteError(w, req, http.StatusBadRequest, "invalid db or meas")
-// 	}
-// }
-
-// 对指定的 measurement 或所有 measurement 做再均衡
-func (hs *HttpService) HandlerRebalance(w http.ResponseWriter, req *http.Request) {
-	if !hs.checkMethodAndAuth(w, req, "POST") {
-		return
-	}
-
-	go hs.sharder.RebalanceForAll()
-
-	hs.WriteText(w, http.StatusAccepted, "rebalance accepted")
-}
-
-// func (hs *HttpService) HandlerRecovery(w http.ResponseWriter, req *http.Request) {
-// 	if !hs.checkMethodAndAuth(w, req, "POST") {
-// 		return
-// 	}
-
-// 	// TODO
-
-// 	fromCircleId, err := hs.formCircleId(req, "from_circle_id") // nolint:golint
-// 	if err != nil {
-// 		hs.WriteError(w, req, http.StatusBadRequest, err.Error())
-// 		return
-// 	}
-// 	toCircleId, err := hs.formCircleId(req, "to_circle_id") // nolint:golint
-// 	if err != nil {
-// 		hs.WriteError(w, req, http.StatusBadRequest, err.Error())
-// 		return
-// 	}
-// 	if fromCircleId == toCircleId {
-// 		hs.WriteError(w, req, http.StatusBadRequest, "from_circle_id and to_circle_id cannot be same")
-// 		return
-// 	}
-
-// 	if hs.tx.CircleStates[fromCircleId].Transferring || hs.tx.CircleStates[toCircleId].Transferring {
-// 		hs.WriteText(w, http.StatusBadRequest, fmt.Sprintf("circle %d or %d is transferring", fromCircleId, toCircleId))
-// 		return
-// 	}
-// 	if hs.tx.Resyncing {
-// 		hs.WriteText(w, http.StatusBadRequest, "proxy is resyncing")
-// 		return
-// 	}
-
-// 	err = hs.setParam(req)
-// 	if err != nil {
-// 		hs.WriteError(w, req, http.StatusBadRequest, err.Error())
-// 		return
-// 	}
-
-// 	backendUrls := hs.formValues(req, "backend_urls")
-// 	dbs := hs.formValues(req, "dbs")
-// 	go hs.tx.Recovery(fromCircleId, toCircleId, backendUrls, dbs)
-// 	hs.WriteText(w, http.StatusAccepted, "accepted")
-// }
-
-// func (hs *HttpService) HandlerResync(w http.ResponseWriter, req *http.Request) {
-// 	if !hs.checkMethodAndAuth(w, req, "POST") {
-// 		return
-// 	}
-
-// 	var sharder sharding.ReplicaSharder
-
-// 	go sharder.Replicate(n) // add/rm nodes
-
-// 	// tick, err := hs.formTick(req)
-// 	// if err != nil {
-// 	// 	hs.WriteError(w, req, http.StatusBadRequest, err.Error())
-// 	// 	return
-// 	// }
-
-// 	// for _, cs := range hs.tx.CircleStates {
-// 	// 	if cs.Transferring {
-// 	// 		hs.WriteText(w, http.StatusBadRequest, fmt.Sprintf("circle %d is transferring", cs.CircleId))
-// 	// 		return
-// 	// 	}
-// 	// }
-// 	// if hs.tx.Resyncing {
-// 	// 	hs.WriteText(w, http.StatusBadRequest, "proxy is resyncing")
-// 	// 	return
-// 	// }
-
-// 	// err = hs.setParam(req)
-// 	// if err != nil {
-// 	// 	hs.WriteError(w, req, http.StatusBadRequest, err.Error())
-// 	// 	return
-// 	// }
-
-// 	// dbs := hs.formValues(req, "dbs")
-// 	// go hs.tx.Resync(dbs, tick)
-// 	hs.WriteText(w, http.StatusAccepted, "accepted")
-// }
-
-func (hs *HttpService) HandlerCleanup(w http.ResponseWriter, req *http.Request) {
-	if !hs.checkMethodAndAuth(w, req, "POST") {
-		return
-	}
-
-	measurement := req.FormValue("measurement")
-	if measurement == "" {
-		go hs.sharder.CleanupForAll()
-		hs.WriteText(w, http.StatusAccepted, "cleanup all measurements, accepted")
-		return
-	} else if hs.dmgr.IsManagedMeasurement(measurement) {
-		go hs.sharder.Cleanup(measurement)
-		hs.WriteText(w, http.StatusAccepted, "cleanup "+measurement+", accepted")
-	} else {
-		hs.WriteError(w, req, http.StatusForbidden, "unmanaged measurement, forbidden")
-	}
-}
-
-func (hs *HttpService) HandlerState(w http.ResponseWriter, req *http.Request) {
-	// measurement: cpe.lwconn_rxtx, mode: sharding replication, replica: 0/4, shards: 5, state: rebalancing
-	// measurement: cpe.lwconn_rxtx, mode: replication, replica: 0/4, nodes: 5, state: rebalancing
-	// measurement: cpe.lwconn_rxtx, mode: sharding, shards: 5, state: rebalancing
-}
-
 func (hs *HttpService) HandlerPromRead(w http.ResponseWriter, req *http.Request) {
 	if !hs.checkMethodAndAuth(w, req, "POST") {
 		return
@@ -613,7 +426,7 @@ func (hs *HttpService) checkMethod(w http.ResponseWriter, req *http.Request, met
 }
 
 func (hs *HttpService) checkAuth(w http.ResponseWriter, req *http.Request) bool {
-	if hs.username == "" && hs.password == "" {
+	if hs.cfg.Proxy.Username == "" && hs.cfg.Proxy.Password == "" {
 		return true
 	}
 	q := req.URL.Query()
@@ -645,11 +458,11 @@ func (hs *HttpService) parseAuth(req *http.Request) (string, string, bool) {
 }
 
 func (hs *HttpService) compareAuth(u, p string) bool {
-	return hs.transAuth(u) == hs.username && hs.transAuth(p) == hs.password
+	return hs.transAuth(u) == hs.cfg.Proxy.Username && hs.transAuth(p) == hs.cfg.Proxy.Password
 }
 
 func (hs *HttpService) transAuth(text string) string {
-	if hs.authEncrypt {
+	if hs.cfg.Proxy.AuthEncrypt {
 		return util.AesEncrypt(text)
 	}
 	return text
@@ -716,62 +529,3 @@ func (hs *HttpService) formTick(req *http.Request) (int64, error) {
 	}
 	return tick, nil
 }
-
-// func (hs *HttpService) setParam(req *http.Request) error {
-// 	var err error
-// 	err = hs.setWorker(req)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	err = hs.setBatch(req)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	err = hs.setLimit(req)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
-// func (hs *HttpService) setWorker(req *http.Request) error {
-// 	str := strings.TrimSpace(req.FormValue("worker"))
-// 	if str != "" {
-// 		worker, err := strconv.Atoi(str)
-// 		if err != nil || worker <= 0 {
-// 			return ErrInvalidWorker
-// 		}
-// 		hs.tx.Worker = worker
-// 	} else {
-// 		hs.tx.Worker = transfer.DefaultWorker
-// 	}
-// 	return nil
-// }
-
-// func (hs *HttpService) setBatch(req *http.Request) error {
-// 	str := strings.TrimSpace(req.FormValue("batch"))
-// 	if str != "" {
-// 		batch, err := strconv.Atoi(str)
-// 		if err != nil || batch <= 0 {
-// 			return ErrInvalidBatch
-// 		}
-// 		hs.tx.Batch = batch
-// 	} else {
-// 		hs.tx.Batch = transfer.DefaultBatch
-// 	}
-// 	return nil
-// }
-
-// func (hs *HttpService) setLimit(req *http.Request) error {
-// 	str := strings.TrimSpace(req.FormValue("limit"))
-// 	if str != "" {
-// 		limit, err := strconv.Atoi(str)
-// 		if err != nil || limit <= 0 {
-// 			return ErrInvalidLimit
-// 		}
-// 		hs.tx.Limit = limit
-// 	} else {
-// 		hs.tx.Limit = transfer.DefaultLimit
-// 	}
-// 	return nil
-// }

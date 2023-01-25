@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/abo/influx-proxy/backend"
+	"go.uber.org/multierr"
 )
 
 type Manager struct {
@@ -153,6 +154,18 @@ func (mgr *Manager) CopyMeasurement(src int32, dest []int32, dbAndMeasurement st
 
 	mgr.transfer.CopyMeasurement(srcNode, destNodes, db, measurement, 0)
 	return nil
+}
+
+func (mgr *Manager) CopyNode(src int32, dest *backend.Backend) error {
+	var err error
+	for _, dbAndMeasurement := range mgr.GetManagedMeasurements() {
+		db, measurement, e := parseDbAndMeasurement(dbAndMeasurement)
+		if e == nil {
+			e = mgr.transfer.CopyMeasurement(mgr.nodes[src], []*backend.Backend{dest}, db, measurement, 0)
+		}
+		err = multierr.Append(err, e)
+	}
+	return err
 }
 
 func (mgr *Manager) RemoveMeasurement(node int32, dbAndMeasurement string) error {

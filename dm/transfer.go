@@ -247,9 +247,9 @@ func (tx *Transfer) CopySeries(src *backend.Backend, dsts []*backend.Backend, db
 		// tx.pool.Submit(func() {
 		rpe := tx.transfer(src, dsts, db, rp, measurement, 0, map[string]interface{}{tag: tagVal})
 		if err == nil {
-			log.Infof("transfer done, src:%s dst:%v db:%s rp:%s meas:%s %s:%d", src.Url, getBackendUrls(dsts), db, rp, measurement, tag, tagVal)
+			log.Infof("transfer done, src:%s dst:%v db:%s rp:%s meas:%s %s:%s", src.Url, getBackendUrls(dsts), db, rp, measurement, tag, tagVal)
 		} else {
-			log.Errorf("transfer error: %s, src:%s dst:%v db:%s rp:%s meas:%s %s:%d", err, src.Url, getBackendUrls(dsts), db, rp, measurement, tag, tagVal)
+			log.Errorf("transfer error: %s, src:%s dst:%v db:%s rp:%s meas:%s %s:%s", err, src.Url, getBackendUrls(dsts), db, rp, measurement, tag, tagVal)
 		}
 		err = multierr.Append(err, rpe)
 		// })
