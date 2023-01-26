@@ -132,16 +132,19 @@ func (hs *HttpService) HandlerReplace(w http.ResponseWriter, req *http.Request) 
 	pwd := req.FormValue("password")
 
 	nodeCfg := &backend.BackendConfig{Url: url, Username: user, Password: pwd}
-	dest := backend.NewBackend(len(hs.nodes), nodeCfg, hs.cfg.Proxy)
+	origin := hs.nodes[id].HttpBackend
+	hs.nodes[id].HttpBackend = backend.NewHttpBackend(nodeCfg, hs.cfg.Proxy)
+	hs.cfg.Nodes[id] = nodeCfg
 
+	log.Infof("node(%d) replaced by %s, origin: %s, start migrate history data", id, url, origin.Url)
 	go func() {
-		err := hs.dmgr.CopyNode(int32(id), dest)
+		err := hs.dmgr.CopyNode(origin, hs.nodes[id].HttpBackend)
 		if err != nil {
-			log.Errorf("failed to replace node(%d) by %s: %v", id, url, err)
+			log.Errorf("failed to migrate data from %s to %s after replace node(%d): %v", origin.Url, url, id, err)
+		} else {
+			log.Infof("migrate done, from: %s, to: %s", origin.Url, url)
 		}
-		hs.nodes[id] = dest
-		hs.cfg.Nodes[id] = nodeCfg
-		log.Infof("node(%d) replaced by %s", id, url)
+		origin.Close()
 	}()
 
 	hs.WriteText(w, http.StatusAccepted, "replace accepted")

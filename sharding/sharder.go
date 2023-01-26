@@ -402,7 +402,7 @@ func (rs *ReplicaSharder) Cleanup(measurement string) error {
 			err = multierr.Append(err, rs.dmgr.RemoveMeasurement(shard, measurement))
 		}
 	}
-	log.Infof("cleanup done, err: %v", err)
+	log.Infof("cleanup of %s done, err: %v", measurement, err)
 	return err
 }
 

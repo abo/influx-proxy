@@ -111,11 +111,11 @@ func (mgr *Manager) ScanTagValues(dbAndMeasurement string, shard int32, tagName 
 
 // 将 measurement 中 shardingTagValue 对应的所有原始数据，从 srcShard 迁移到 destShard
 func (mgr *Manager) CopySeries(dbAndMeasurement string, src int32, dest []int32, tagName string, tagValue string) error {
-	srcNode := mgr.nodes[src]
-	destNodes := make([]*backend.Backend, 0, len(dest))
+	srcNode := mgr.nodes[src].HttpBackend
+	destNodes := make([]*backend.HttpBackend, 0, len(dest))
 	for _, n := range dest {
 		if src != n {
-			destNodes = append(destNodes, mgr.nodes[n])
+			destNodes = append(destNodes, mgr.nodes[n].HttpBackend)
 		}
 	}
 
@@ -139,11 +139,11 @@ func (mgr *Manager) RemoveSeries(dbAndMeasurement string, shard int32, tagName s
 
 // 从 srcNode 中将指定 Measurement 整体复制到 destNode
 func (mgr *Manager) CopyMeasurement(src int32, dest []int32, dbAndMeasurement string) error {
-	srcNode := mgr.nodes[src]
-	destNodes := make([]*backend.Backend, 0, len(dest))
+	srcNode := mgr.nodes[src].HttpBackend
+	destNodes := make([]*backend.HttpBackend, 0, len(dest))
 	for _, n := range dest {
 		if src != n {
-			destNodes = append(destNodes, mgr.nodes[n])
+			destNodes = append(destNodes, mgr.nodes[n].HttpBackend)
 		}
 	}
 
@@ -156,12 +156,20 @@ func (mgr *Manager) CopyMeasurement(src int32, dest []int32, dbAndMeasurement st
 	return nil
 }
 
-func (mgr *Manager) CopyNode(src int32, dest *backend.Backend) error {
+func (mgr *Manager) CopyNode(src *backend.HttpBackend, dest *backend.HttpBackend) error {
 	var err error
-	for _, dbAndMeasurement := range mgr.GetManagedMeasurements() {
+	if len(mgr.dbs) > 0 {
+		for db := range mgr.dbs {
+			measurementsInDb := src.GetMeasurements(db)
+			for _, measurement := range measurementsInDb {
+				err = multierr.Append(err, mgr.transfer.CopyMeasurement(src, []*backend.HttpBackend{dest}, db, measurement, 0))
+			}
+		}
+	}
+	for dbAndMeasurement := range mgr.measurements {
 		db, measurement, e := parseDbAndMeasurement(dbAndMeasurement)
 		if e == nil {
-			e = mgr.transfer.CopyMeasurement(mgr.nodes[src], []*backend.Backend{dest}, db, measurement, 0)
+			e = mgr.transfer.CopyMeasurement(src, []*backend.HttpBackend{dest}, db, measurement, 0)
 		}
 		err = multierr.Append(err, e)
 	}

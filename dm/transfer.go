@@ -47,7 +47,7 @@ func NewTransfer() (tx *Transfer) {
 	}
 }
 
-func getBackendUrls(backends []*backend.Backend) []string {
+func getBackendUrls(backends []*backend.HttpBackend) []string {
 	backendUrls := make([]string, len(backends))
 	for k, be := range backends {
 		backendUrls[k] = be.Url
@@ -79,7 +79,7 @@ func reformFieldKeys(fieldKeys map[string][]string) map[string]string {
 	return fieldMap
 }
 
-func (tx *Transfer) write(ch chan *QueryResult, dsts []*backend.Backend, db, rp, meas string, tags map[string]struct{}, fields map[string]string) error {
+func (tx *Transfer) write(ch chan *QueryResult, dsts []*backend.HttpBackend, db, rp, meas string, tags map[string]struct{}, fields map[string]string) error {
 	var buf bytes.Buffer
 	var wg sync.WaitGroup
 	pool, err := ants.NewPool(len(dsts) * 20)
@@ -151,7 +151,7 @@ func (tx *Transfer) write(ch chan *QueryResult, dsts []*backend.Backend, db, rp,
 	return nil
 }
 
-func (tx *Transfer) query(ch chan *QueryResult, src *backend.Backend, db, rp, meas string, tick int64, conditions map[string]interface{}) {
+func (tx *Transfer) query(ch chan *QueryResult, src *backend.HttpBackend, db, rp, meas string, tick int64, conditions map[string]interface{}) {
 	defer close(ch)
 	for offset := 0; ; offset += tx.Limit {
 		whereClause := ""
@@ -196,7 +196,7 @@ func (tx *Transfer) query(ch chan *QueryResult, src *backend.Backend, db, rp, me
 	}
 }
 
-func (tx *Transfer) transfer(src *backend.Backend, dsts []*backend.Backend, db, rp, meas string, tick int64, conditions map[string]interface{}) error {
+func (tx *Transfer) transfer(src *backend.HttpBackend, dsts []*backend.HttpBackend, db, rp, meas string, tick int64, conditions map[string]interface{}) error {
 	ch := make(chan *QueryResult, 4)
 	go tx.query(ch, src, db, rp, meas, tick, conditions)
 
@@ -221,7 +221,7 @@ func (tx *Transfer) transfer(src *backend.Backend, dsts []*backend.Backend, db, 
 	return tx.write(ch, dsts, db, rp, meas, tags, fields)
 }
 
-func (tx *Transfer) CopyMeasurement(src *backend.Backend, dsts []*backend.Backend, db, meas string, tick int64) error {
+func (tx *Transfer) CopyMeasurement(src *backend.HttpBackend, dsts []*backend.HttpBackend, db, meas string, tick int64) error {
 	var err error
 	rps := src.GetRetentionPolicies(db)
 	for _, rp := range rps {
@@ -239,7 +239,7 @@ func (tx *Transfer) CopyMeasurement(src *backend.Backend, dsts []*backend.Backen
 	return err
 }
 
-func (tx *Transfer) CopySeries(src *backend.Backend, dsts []*backend.Backend, db, measurement, tag string, tagVal string) error {
+func (tx *Transfer) CopySeries(src *backend.HttpBackend, dsts []*backend.HttpBackend, db, measurement, tag string, tagVal string) error {
 	var err error
 	rps := src.GetRetentionPolicies(db)
 	for _, rp := range rps {

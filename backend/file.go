@@ -7,11 +7,11 @@ package backend
 import (
 	"encoding/binary"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/abo/influx-proxy/log"
 	"github.com/abo/influx-proxy/util"
 )
 
@@ -37,19 +37,19 @@ func NewFileBackend(filename string, datadir string) (fb *FileBackend, err error
 	pathname := filepath.Join(datadir, filename)
 	fb.producer, err = os.OpenFile(pathname+".dat", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
-		log.Printf("open producer error: %s %s", fb.filename, err)
+		log.Errorf("open producer error: %s %s", fb.filename, err)
 		return
 	}
 
 	fb.consumer, err = os.OpenFile(pathname+".dat", os.O_RDONLY, 0644)
 	if err != nil {
-		log.Printf("open consumer error: %s %s", fb.filename, err)
+		log.Errorf("open consumer error: %s %s", fb.filename, err)
 		return
 	}
 
 	fb.meta, err = os.OpenFile(pathname+".rec", os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		log.Printf("open meta error: %s %s", fb.filename, err)
+		log.Errorf("open meta error: %s %s", fb.filename, err)
 		return
 	}
 
@@ -67,13 +67,13 @@ func (fb *FileBackend) Write(p []byte) (err error) {
 	var length = uint32(len(p))
 	err = binary.Write(fb.producer, binary.BigEndian, length)
 	if err != nil {
-		log.Print("write length error: ", err)
+		log.Error("write length error: ", err)
 		return
 	}
 
 	n, err := fb.producer.Write(p)
 	if err != nil {
-		log.Print("write error: ", err)
+		log.Error("write error: ", err)
 		return
 	}
 	if n != len(p) {
@@ -82,7 +82,7 @@ func (fb *FileBackend) Write(p []byte) (err error) {
 
 	err = fb.producer.Sync()
 	if err != nil {
-		log.Print("sync meta error: ", err)
+		log.Error("sync meta error: ", err)
 		return
 	}
 
@@ -104,14 +104,14 @@ func (fb *FileBackend) Read() (p []byte, err error) {
 
 	err = binary.Read(fb.consumer, binary.BigEndian, &length)
 	if err != nil {
-		log.Print("read length error: ", err)
+		log.Error("read length error: ", err)
 		return
 	}
 	p = make([]byte, length)
 
 	_, err = io.ReadFull(fb.consumer, p)
 	if err != nil {
-		log.Print("read error: ", err)
+		log.Error("read error: ", err)
 		return
 	}
 	return
@@ -123,7 +123,7 @@ func (fb *FileBackend) RollbackMeta() (err error) {
 
 	_, err = fb.meta.Seek(0, io.SeekStart)
 	if err != nil {
-		log.Printf("seek meta error: %s %s", fb.filename, err)
+		log.Errorf("seek meta error: %s %s", fb.filename, err)
 		return
 	}
 
@@ -131,14 +131,14 @@ func (fb *FileBackend) RollbackMeta() (err error) {
 	err = binary.Read(fb.meta, binary.BigEndian, &offset)
 	if err != nil {
 		if err != io.EOF {
-			log.Printf("read meta error: %s %s", fb.filename, err)
+			log.Errorf("read meta error: %s %s", fb.filename, err)
 		}
 		return
 	}
 
 	_, err = fb.consumer.Seek(offset, io.SeekStart)
 	if err != nil {
-		log.Printf("seek consumer error: %s %s", fb.filename, err)
+		log.Errorf("seek consumer error: %s %s", fb.filename, err)
 		return
 	}
 	return
@@ -150,20 +150,20 @@ func (fb *FileBackend) UpdateMeta() (err error) {
 
 	producerOffset, err := fb.producer.Seek(0, io.SeekCurrent)
 	if err != nil {
-		log.Printf("seek producer error: %s %s", fb.filename, err)
+		log.Errorf("seek producer error: %s %s", fb.filename, err)
 		return
 	}
 
 	offset, err := fb.consumer.Seek(0, io.SeekCurrent)
 	if err != nil {
-		log.Printf("seek consumer error: %s %s", fb.filename, err)
+		log.Errorf("seek consumer error: %s %s", fb.filename, err)
 		return
 	}
 
 	if producerOffset == offset {
 		err = fb.CleanUp()
 		if err != nil {
-			log.Printf("cleanup error: %s %s", fb.filename, err)
+			log.Errorf("cleanup error: %s %s", fb.filename, err)
 			return
 		}
 		offset = 0
@@ -171,20 +171,20 @@ func (fb *FileBackend) UpdateMeta() (err error) {
 
 	_, err = fb.meta.Seek(0, io.SeekStart)
 	if err != nil {
-		log.Printf("seek meta error: %s %s", fb.filename, err)
+		log.Errorf("seek meta error: %s %s", fb.filename, err)
 		return
 	}
 
-	log.Printf("write meta: %s, %d", fb.filename, offset)
+	log.Errorf("write meta: %s, %d", fb.filename, offset)
 	err = binary.Write(fb.meta, binary.BigEndian, &offset)
 	if err != nil {
-		log.Printf("write meta error: %s %s", fb.filename, err)
+		log.Errorf("write meta error: %s %s", fb.filename, err)
 		return
 	}
 
 	err = fb.meta.Sync()
 	if err != nil {
-		log.Printf("sync meta error: %s %s", fb.filename, err)
+		log.Errorf("sync meta error: %s %s", fb.filename, err)
 		return
 	}
 
@@ -194,23 +194,23 @@ func (fb *FileBackend) UpdateMeta() (err error) {
 func (fb *FileBackend) CleanUp() (err error) {
 	_, err = fb.consumer.Seek(0, io.SeekStart)
 	if err != nil {
-		log.Print("seek consumer error: ", err)
+		log.Error("seek consumer error: ", err)
 		return
 	}
 	filename := filepath.Join(fb.datadir, fb.filename+".dat")
 	err = os.Truncate(filename, 0)
 	if err != nil {
-		log.Print("truncate error: ", err)
+		log.Error("truncate error: ", err)
 		return
 	}
 	err = fb.producer.Close()
 	if err != nil {
-		log.Print("close producer error: ", err)
+		log.Error("close producer error: ", err)
 		return
 	}
 	fb.producer, err = os.OpenFile(filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 	if err != nil {
-		log.Print("open producer error: ", err)
+		log.Error("open producer error: ", err)
 		return
 	}
 	fb.dataflag = false

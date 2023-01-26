@@ -199,7 +199,7 @@ func (hb *HttpBackend) IsWriting() (b bool) {
 func (hb *HttpBackend) Ping() bool {
 	resp, err := hb.client.Get(hb.Url + "/ping")
 	if err != nil {
-		log.Errorf("http error: ", err)
+		log.Error("http error: ", err)
 		return false
 	}
 	defer resp.Body.Close()
@@ -214,7 +214,7 @@ func (hb *HttpBackend) Write(db, rp string, p []byte) (err error) {
 	var buf bytes.Buffer
 	err = Compress(&buf, p)
 	if err != nil {
-		log.Errorf("compress error: ", err)
+		log.Error("compress error: ", err)
 		return
 	}
 	return hb.WriteStream(db, rp, &buf, true)
@@ -239,7 +239,7 @@ func (hb *HttpBackend) WriteStream(db, rp string, stream io.Reader, compressed b
 
 	resp, err := hb.client.Do(req)
 	if err != nil {
-		log.Errorf("http error: ", err)
+		log.Error("http error: ", err)
 		hb.active.Store(false)
 		return
 	}
@@ -252,7 +252,7 @@ func (hb *HttpBackend) WriteStream(db, rp string, stream io.Reader, compressed b
 
 	respbuf, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Errorf("readall error: ", err)
+		log.Error("readall error: ", err)
 		return
 	}
 	log.Errorf("error response: %s", respbuf)
@@ -287,7 +287,7 @@ func (hb *HttpBackend) ReadProm(req *http.Request, w http.ResponseWriter) (err e
 
 	req.URL, err = url.Parse(hb.Url + "/api/v1/prom/read?" + req.Form.Encode())
 	if err != nil {
-		log.Errorf("internal url parse error: ", err)
+		log.Error("internal url parse error: ", err)
 		return
 	}
 
@@ -318,7 +318,7 @@ func (hb *HttpBackend) QueryFlux(req *http.Request, w http.ResponseWriter) (err 
 
 	req.URL, err = url.Parse(hb.Url + "/api/v2/query")
 	if err != nil {
-		log.Errorf("internal url parse error: ", err)
+		log.Error("internal url parse error: ", err)
 		return
 	}
 
@@ -355,7 +355,7 @@ func (hb *HttpBackend) Query(req *http.Request, w http.ResponseWriter, decompres
 
 	req.URL, qr.Err = url.Parse(hb.Url + "/query?" + req.Form.Encode())
 	if qr.Err != nil {
-		log.Errorf("internal url parse error: ", qr.Err)
+		log.Error("internal url parse error: ", qr.Err)
 		return
 	}
 
