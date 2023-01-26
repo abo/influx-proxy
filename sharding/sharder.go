@@ -133,9 +133,6 @@ func (rs *ReplicaSharder) Scale(numberOfShards int) error {
 		wg.Add(1)
 		go func(m string) {
 			defer wg.Done()
-			if _, sharded := rs.GetShardingTag(m); !sharded {
-				return
-			}
 			for replica := 0; replica < rs.getNumberOfReplicas(m); replica++ {
 				if rs.getNumberOfShards(m, replica) == int32(numberOfShards) {
 					continue

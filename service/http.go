@@ -39,33 +39,33 @@ var (
 )
 
 type HttpService struct { // nolint:golint
-	nodes   []*backend.Backend
-	proxy   *influxproxy.Proxy
-	dmgr    *dm.Manager
-	sharder *sharding.ReplicaSharder
-	cfg     *backend.Config
+	dataNodes []*backend.Backend
+	proxy     *influxproxy.Proxy
+	dmgr      *dm.Manager
+	sharder   *sharding.ReplicaSharder
+	cfg       *backend.Config
 
 	// writeTracing bool
 	// queryTracing bool
 }
 
 func NewHttpService(cfg *backend.Config) (hs *HttpService) { // nolint:golint
-	nodes := make([]*backend.Backend, 0, len(cfg.Nodes))
+	dataNodes := make([]*backend.Backend, 0, len(cfg.Nodes))
 	for i, nodeCfg := range cfg.Nodes {
-		nodes = append(nodes, backend.NewBackend(i, nodeCfg, cfg.Proxy))
+		dataNodes = append(dataNodes, backend.NewBackend(i, nodeCfg, cfg.Proxy))
 	}
 
-	dmgr := dm.NewManager(nodes, cfg.Proxy.Measurements)
+	dmgr := dm.NewManager(dataNodes, cfg.Proxy.Measurements)
 	sharder := sharding.NewSharder(dmgr, cfg.Sharding)
-	sharder.Init(len(nodes), 1)                              // TODO  by legacy config
-	proxy := influxproxy.NewProxy(cfg, nodes, dmgr, sharder) //cfg.Proxy.WriteTracing,  //cfg.Proxy.QueryTracing,
+	sharder.Init(len(dataNodes), 1)                              // TODO  by legacy config
+	proxy := influxproxy.NewProxy(cfg, dataNodes, dmgr, sharder) //cfg.Proxy.WriteTracing,  //cfg.Proxy.QueryTracing,
 
 	return &HttpService{
-		nodes:   nodes,
-		proxy:   proxy,
-		dmgr:    dmgr,
-		sharder: sharder,
-		cfg:     cfg,
+		dataNodes: dataNodes,
+		proxy:     proxy,
+		dmgr:      dmgr,
+		sharder:   sharder,
+		cfg:       cfg,
 	}
 }
 

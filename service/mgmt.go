@@ -17,8 +17,8 @@ func (hs *HttpService) HandlerHealth(w http.ResponseWriter, req *http.Request) {
 	stats := req.URL.Query().Get("stats") == "true"
 
 	var wg sync.WaitGroup
-	health := make([]interface{}, len(hs.nodes))
-	for i, n := range hs.nodes {
+	health := make([]interface{}, len(hs.dataNodes))
+	for i, n := range hs.dataNodes {
 		wg.Add(1)
 		go func(i int, node *backend.Backend) {
 			defer wg.Done()
@@ -84,9 +84,10 @@ func (hs *HttpService) HandlerScale(w http.ResponseWriter, req *http.Request) {
 
 	nodeCfg := &backend.BackendConfig{Url: url, Username: user, Password: pwd}
 	hs.cfg.Nodes = append(hs.cfg.Nodes, nodeCfg)
-	hs.nodes = append(hs.nodes, backend.NewBackend(len(hs.nodes), nodeCfg, hs.cfg.Proxy))
+	hs.dataNodes = append(hs.dataNodes, backend.NewBackend(len(hs.dataNodes), nodeCfg, hs.cfg.Proxy))
+	hs.dmgr.SetDataNodes(hs.dataNodes)
 
-	go hs.sharder.Scale(len(hs.nodes))
+	go hs.sharder.Scale(len(hs.dataNodes))
 
 	hs.WriteText(w, http.StatusAccepted, "scale accepted")
 }
@@ -96,7 +97,7 @@ func (hs *HttpService) HandlerReplicate(w http.ResponseWriter, req *http.Request
 		return
 	}
 	replicas, err := strconv.Atoi(req.FormValue("replicas"))
-	if err != nil || replicas > len(hs.nodes) {
+	if err != nil || replicas > len(hs.dataNodes) {
 		hs.WriteError(w, req, http.StatusBadRequest, "invalid replicas")
 		return
 	}
@@ -109,7 +110,7 @@ func (hs *HttpService) HandlerRepair(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id, err := strconv.Atoi(req.FormValue("id"))
-	if err != nil || id >= len(hs.nodes) {
+	if err != nil || id >= len(hs.dataNodes) {
 		hs.WriteError(w, req, http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -123,7 +124,7 @@ func (hs *HttpService) HandlerReplace(w http.ResponseWriter, req *http.Request) 
 	}
 
 	id, err := strconv.Atoi(req.FormValue("id"))
-	if err != nil || id >= len(hs.nodes) {
+	if err != nil || id >= len(hs.dataNodes) {
 		hs.WriteError(w, req, http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -132,13 +133,13 @@ func (hs *HttpService) HandlerReplace(w http.ResponseWriter, req *http.Request) 
 	pwd := req.FormValue("password")
 
 	nodeCfg := &backend.BackendConfig{Url: url, Username: user, Password: pwd}
-	origin := hs.nodes[id].HttpBackend
-	hs.nodes[id].HttpBackend = backend.NewHttpBackend(nodeCfg, hs.cfg.Proxy)
+	origin := hs.dataNodes[id].HttpBackend
+	hs.dataNodes[id].HttpBackend = backend.NewHttpBackend(nodeCfg, hs.cfg.Proxy)
 	hs.cfg.Nodes[id] = nodeCfg
 
 	log.Infof("node(%d) replaced by %s, origin: %s, start migrate history data", id, url, origin.Url)
 	go func() {
-		err := hs.dmgr.CopyNode(origin, hs.nodes[id].HttpBackend)
+		err := hs.dmgr.CopyNode(origin, hs.dataNodes[id].HttpBackend)
 		if err != nil {
 			log.Errorf("failed to migrate data from %s to %s after replace node(%d): %v", origin.Url, url, id, err)
 		} else {

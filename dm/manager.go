@@ -34,6 +34,10 @@ func NewManager(nodes []*backend.Backend, measurements []string) *Manager {
 	return mgr
 }
 
+func (mgr *Manager) SetDataNodes(nodes []*backend.Backend) {
+	mgr.nodes = nodes
+}
+
 func (mgr *Manager) IsManagedMeasurement(dbAndMeasurement string) bool {
 	if _, ok := mgr.measurements[dbAndMeasurement]; ok {
 		return true
