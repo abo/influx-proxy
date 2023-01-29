@@ -1,33 +1,16 @@
 # InfluxDB Proxy
 
-[![CN doc](https://img.shields.io/badge/文档-中文版-blue.svg)](https://github.com/chengshiwen/influx-proxy/wiki)
-[![EN doc](https://img.shields.io/badge/document-English-blue.svg)](https://github.com/chengshiwen/influx-proxy/blob/master/README.md)
-[![Go Report Card](https://goreportcard.com/badge/chengshiwen/influx-proxy)](https://goreportcard.com/report/chengshiwen/influx-proxy)
-[![LICENSE](https://img.shields.io/github/license/chengshiwen/influx-proxy.svg)](https://github.com/chengshiwen/influx-proxy/blob/master/LICENSE)
-[![Releases](https://img.shields.io/github/v/release/chengshiwen/influx-proxy.svg)](https://github.com/chengshiwen/influx-proxy/releases)
-![GitHub stars](https://img.shields.io/github/stars/chengshiwen/influx-proxy.svg?label=github%20stars&logo=github)
-[![Docker pulls](https://img.shields.io/docker/pulls/chengshiwen/influx-proxy.svg)](https://hub.docker.com/r/chengshiwen/influx-proxy)
-
-This project adds a basic high availability and consistent hash layer to InfluxDB.
+InfluxDB Proxy is a simple influxdb sharding cluster, actually. its initially forked from [chengshiwen/influx-proxy](https://github.com/chengshiwen/influx-proxy), added *measurement sharding* and *raft cluster*
 
 NOTE: influx-proxy must be built with Go 1.16+ with Go module support, don't implement udp.
 
-NOTE: [InfluxDB Cluster](https://github.com/chengshiwen/influxdb-cluster) - open source alternative to [InfluxDB Enterprise](https://docs.influxdata.com/enterprise_influxdb/v1.8/) has been released, which is better than InfluxDB Proxy.
-
 ## Why
 
-We used [InfluxDB Relay](https://github.com/influxdata/influxdb-relay) before, but it doesn't support some demands.
-We use grafana for visualizing time series data, so we need add datasource for grafana. We need change the datasource config when influxdb is down.
-We need transfer data across idc, but Relay doesn't support gzip.
-It's inconvenient to analyse data with connecting different influxdb.
-Therefore, we made [InfluxDB Proxy](https://github.com/shell909090/influx-proxy). More details please visit [https://github.com/shell909090/influx-proxy](https://github.com/shell909090/influx-proxy).
-
-Forked from the above InfluxDB Proxy, after many improvements and optimizations, [InfluxDB Proxy v1](https://github.com/chengshiwen/influx-proxy/tree/branch-1.x) has released, which no longer depends on python and redis, and supports more features.
-
-Since the InfluxDB Proxy v1 is limited by the only `ONE` database and the `KEYMAPS` configuration, we refactored [InfluxDB Proxy v2](https://github.com/chengshiwen/influx-proxy) with high availability and consistent hash, which supports multiple databases and tools to rebalance, recovery, resync and cleanup.
+[chengshiwen/influx-proxy](https://github.com/chengshiwen/influx-proxy) support database sharding with consistent hash, which allocate a whole measurement to a single influxdb node. but in our scenario, its just a few large measurements, so we forked it and enable measurement sharding.
 
 ## Features
 
+* Support sharding measurement by tag.
 * Support query and write.
 * Support /api/v2 endpoints.
 * Support flux language query.
@@ -37,13 +20,12 @@ Since the InfluxDB Proxy v1 is limited by the only `ONE` database and the `KEYMA
 * Cache data to file when write failed, then rewrite.
 * Support multiple databases to create and store.
 * Support database sharding with consistent hash.
-* Support tools to rebalance, recovery, resync and cleanup.
+* Support tools to rebalance, scale, replicate, repair and cleanup in runtime.
 * Load config file and no longer depend on python and redis.
 * Support both rp and precision parameter when writing data.
 * Support influxdb-java, influxdb shell and grafana.
 * Support prometheus remote read and write.
 * Support authentication and https.
-* Support authentication encryption.
 * Support health status check.
 * Support database whitelist.
 * Support version display.

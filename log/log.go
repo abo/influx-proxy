@@ -64,7 +64,9 @@ type Logger interface {
 	Error(v ...interface{})
 	Errorf(format string, v ...interface{})
 	GoLogger() *golog.Logger
+	ZapLogger() *zap.Logger
 	Flush()
+	Fatalf(format string, v ...interface{})
 }
 
 func init() {
@@ -118,6 +120,8 @@ func Info(v ...interface{})                  { s().Info(v...) }
 func Warn(v ...interface{})                  { s().Warn(v...) }
 func Error(v ...interface{})                 { s().Error(v...) }
 func Flush()                                 { l().Sync() }
+func Zap() *zap.Logger                       { return l() }
+func Fatalf(format string, v ...interface{}) { s().Fatalf(format, v...) }
 
 func l() *zap.Logger {
 	return globalL.Load().(*zap.Logger)
@@ -144,6 +148,8 @@ func (l *logger) Warn(vals ...interface{})                  { l.inner.Warn(vals.
 func (l *logger) Error(vals ...interface{})                 { l.inner.Error(vals...) }
 func (l *logger) GoLogger() *golog.Logger                   { return golog.New(&levelPrefixWriter{l}, "", 0) }
 func (l *logger) Flush()                                    { l.inner.Sync() }
+func (l *logger) Fatalf(format string, vals ...interface{}) { l.inner.Fatalf(format, vals...) }
+func (l *logger) ZapLogger() *zap.Logger                    { return l.inner.Desugar() }
 
 type levelPrefixWriter struct{ l *logger }
 
