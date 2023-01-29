@@ -21,7 +21,7 @@ sharding:
   - name: "cpe.cpe_lw_conn_rxtx"
     tag: "customer"
 
-nodes:
+data-nodes:
   - url: "http://127.0.0.1:8087"
     username: ""
     password: ""

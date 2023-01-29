@@ -83,7 +83,7 @@ func (hs *HttpService) HandlerScale(w http.ResponseWriter, req *http.Request) {
 	pwd := req.FormValue("password")
 
 	nodeCfg := &backend.BackendConfig{Url: url, Username: user, Password: pwd}
-	hs.cfg.Nodes = append(hs.cfg.Nodes, nodeCfg)
+	hs.cfg.DataNodes = append(hs.cfg.DataNodes, nodeCfg)
 	hs.dataNodes = append(hs.dataNodes, backend.NewBackend(len(hs.dataNodes), nodeCfg, hs.cfg.Proxy))
 	hs.dmgr.SetDataNodes(hs.dataNodes)
 
@@ -135,7 +135,7 @@ func (hs *HttpService) HandlerReplace(w http.ResponseWriter, req *http.Request) 
 	nodeCfg := &backend.BackendConfig{Url: url, Username: user, Password: pwd}
 	origin := hs.dataNodes[id].HttpBackend
 	hs.dataNodes[id].HttpBackend = backend.NewHttpBackend(nodeCfg, hs.cfg.Proxy)
-	hs.cfg.Nodes[id] = nodeCfg
+	hs.cfg.DataNodes[id] = nodeCfg
 
 	log.Infof("node(%d) replaced by %s, origin: %s, start migrate history data", id, url, origin.Url)
 	go func() {

@@ -27,10 +27,10 @@ var (
 )
 
 type Config struct {
-	Proxy    *ProxyConfig       `mapstructure:"proxy"`
-	Sharding []*sharding.Config `mapstructure:"sharding"`
-	Nodes    []*BackendConfig   `mapstructure:"nodes"`
-	Logging  log.Options        `mapstructure:"logging"`
+	Proxy     *ProxyConfig       `mapstructure:"proxy"`
+	Sharding  []*sharding.Config `mapstructure:"sharding"`
+	DataNodes []*BackendConfig   `mapstructure:"data-nodes"`
+	Logging   log.Options        `mapstructure:"logging"`
 }
 
 type BackendConfig struct { // nolint:golint
@@ -84,10 +84,10 @@ func NewFileConfig(cfgfile string) (cfg *Config, err error) {
 		return
 	}
 	cfg = &Config{
-		Proxy:    &ProxyConfig{},
-		Sharding: []*sharding.Config{},
-		Nodes:    []*BackendConfig{},
-		Logging:  log.Options{},
+		Proxy:     &ProxyConfig{},
+		Sharding:  []*sharding.Config{},
+		DataNodes: []*BackendConfig{},
+		Logging:   log.Options{},
 	}
 	err = viper.Unmarshal(cfg)
 	if err != nil {
@@ -130,7 +130,7 @@ func (cfg *Config) setDefault() {
 
 func (cfg *Config) checkConfig() (err error) {
 	urls := make(map[string]struct{})
-	for _, backend := range cfg.Nodes {
+	for _, backend := range cfg.DataNodes {
 		if backend.Url == "" {
 			return ErrEmptyBackendUrl
 		}

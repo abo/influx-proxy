@@ -50,8 +50,8 @@ type HttpService struct { // nolint:golint
 }
 
 func NewHttpService(cfg *backend.Config) (hs *HttpService) { // nolint:golint
-	dataNodes := make([]*backend.Backend, 0, len(cfg.Nodes))
-	for i, nodeCfg := range cfg.Nodes {
+	dataNodes := make([]*backend.Backend, 0, len(cfg.DataNodes))
+	for i, nodeCfg := range cfg.DataNodes {
 		dataNodes = append(dataNodes, backend.NewBackend(i, nodeCfg, cfg.Proxy))
 	}
 
