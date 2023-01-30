@@ -222,6 +222,9 @@ func (tx *Transfer) transfer(src *backend.HttpBackend, dsts []*backend.HttpBacke
 }
 
 func (tx *Transfer) CopyMeasurement(src *backend.HttpBackend, dsts []*backend.HttpBackend, db, meas string, tick int64) error {
+	if len(dsts) == 0 {
+		return nil
+	}
 	var err error
 	rps := src.GetRetentionPolicies(db)
 	for _, rp := range rps {
@@ -240,6 +243,9 @@ func (tx *Transfer) CopyMeasurement(src *backend.HttpBackend, dsts []*backend.Ht
 }
 
 func (tx *Transfer) CopySeries(src *backend.HttpBackend, dsts []*backend.HttpBackend, db, measurement, tag string, tagVal string) error {
+	if len(dsts) == 0 {
+		return nil
+	}
 	var err error
 	rps := src.GetRetentionPolicies(db)
 	for _, rp := range rps {
