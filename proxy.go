@@ -36,7 +36,7 @@ func (proxy *Proxy) GetAllocatedNodes(database, measurement string, parseTag ...
 	} else if len(parseTag) == 0 {
 		return proxy.nodes, nil
 	} else if key, err := parseTag[0](shardingTagName); err != nil {
-		return nil, err // TODO wrap with no shardingTag
+		return nil, fmt.Errorf("cannot determine allocated node: %w", err)
 	} else {
 		shards = proxy.sharder.GetAllocatedShards(database+"."+measurement, key)
 		log.Debugf("%s.%s.%s allocated at %v", database, measurement, key, shards)
@@ -50,6 +50,10 @@ func (proxy *Proxy) GetAllocatedNodes(database, measurement string, parseTag ...
 
 func (ip *Proxy) GetAllBackends() []*backend.Backend {
 	return ip.nodes
+}
+
+func (ip *Proxy) SetDataNodes(nodes []*backend.Backend) {
+	ip.nodes = nodes
 }
 
 func (ip *Proxy) QueryFlux(w http.ResponseWriter, req *http.Request, qr *backend.QueryRequest) (err error) {

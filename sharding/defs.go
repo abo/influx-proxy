@@ -30,25 +30,27 @@ type DataManager interface {
 	RemoveMeasurement(node int32, dbAndMeasurement string) error
 }
 
-type replicaState int
+type ReplicaState int
 
 const (
-	balanced replicaState = iota
-	rebalancing
+	Balanced ReplicaState = iota
+	Rebalancing
 )
 
-func state2str(s replicaState) string {
-	switch s {
-	case balanced:
-		return "balanced"
-	case rebalancing:
-		return "rebalancing"
-	default:
-		return "unknown"
-	}
-}
+// func state2str(s ReplicaState) string {
+// 	switch s {
+// 	case Balanced:
+// 		return "balanced"
+// 	case Rebalancing:
+// 		return "rebalancing"
+// 	default:
+// 		return "unknown"
+// 	}
+// }
 
-type Replica struct {
-	shards int32        // 该 replica 的分片数, 对于 unsharded measurement 为该 replica 的节点数
-	state  replicaState // 该 replica 的数据分布状态, 如是否均衡
+type ReplicaInfo struct {
+	Measurement string       // measurement
+	Index       int          // replica index, 0-based
+	Shards      int32        // how many shards(nodes) for this replica
+	State       ReplicaState // replica state, balanced/rebalancing/
 }

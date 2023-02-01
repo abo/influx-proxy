@@ -29,6 +29,7 @@ var (
 type Config struct {
 	Proxy     *ProxyConfig       `mapstructure:"proxy"`
 	Sharding  []*sharding.Config `mapstructure:"sharding"`
+	Cluster   *ClusterConfig     `mapstructure:"cluster"`
 	DataNodes []*BackendConfig   `mapstructure:"data-nodes"`
 	Logging   log.Options        `mapstructure:"logging"`
 }
@@ -48,8 +49,8 @@ type ProxyConfig struct {
 	HTTPSKey     string   `mapstructure:"https-cert-key"`
 	Username     string   `mapstructure:"username"`
 	Password     string   `mapstructure:"password"`
-	AuthEncrypt  bool     `mapstructure:"auth_encrypt"`
-	DataDir      string   `mapstructure:"data_dir"`
+	AuthEncrypt  bool     `mapstructure:"auth-encrypt"`
+	DataDir      string   `mapstructure:"data-dir"`
 	Measurements []string `mapstructure:"measurements"`
 
 	FlushSize       int `mapstructure:"flush-size"`
@@ -68,14 +69,25 @@ type ProxyConfig struct {
 	// PprofEnabled    bool   `mapstructure:"pprof_enabled"`
 }
 
-// type LoggingConfig struct {
-// 	Level        string `mapstructure:"level"`
-// 	File         string `mapstructure:"file"` // if empty, output to stdout
-// 	MaxSizeMB    int    `mapstructure:"file-max-size"`
-// 	MaxAgeDays   int    `mapstructure:"file-max-age"`
-// 	WriteTracing bool   `mapstructure:"write-tracing"`
-// 	QueryTracing bool   `mapstructure:"query-tracing"`
-// }
+type ClusterConfig struct {
+	LocalID uint64        `mapstructure:"local-id"`
+	Peers   []*PeerConfig `mapstructure:"peers"`
+}
+
+func (cc *ClusterConfig) GetPeers() map[uint64]string {
+	results := make(map[uint64]string, len(cc.Peers))
+	for _, peer := range cc.Peers {
+		if peer.ID != cc.LocalID {
+			results[peer.ID] = peer.Url
+		}
+	}
+	return results
+}
+
+type PeerConfig struct {
+	ID  uint64 `mapstructure:"id"`
+	Url string `mapstructure:"url"`
+}
 
 func NewFileConfig(cfgfile string) (cfg *Config, err error) {
 	viper.SetConfigFile(cfgfile)

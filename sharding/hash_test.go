@@ -5,17 +5,6 @@ import (
 	"testing"
 )
 
-// func TestIt(t *testing.T) {
-// 	ms := []string{"cpe.cpe_phy_priority_rxtx",
-// 		"cpe.cpe_phy_rxtx",
-// 		"cpe.shared_subscription_rxtx",
-// 		"cpe.subscription_rxtx"}
-// 	for _, m := range ms {
-// 		fmt.Println(jumpHashForReplica(str2key(m), 0, 2))
-// 	}
-// 	t.FailNow()
-// }
-
 func TestHash(t *testing.T) {
 	count := 100000
 	replicas := 2
