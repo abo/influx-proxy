@@ -275,19 +275,23 @@ func (rc *raftNode) writeError(err error) {
 	rc.node.Stop()
 }
 
-func anyActive(peers map[uint64]string, timeout time.Duration) bool {
+func anyActive(id uint64, peers map[uint64]string, timeout time.Duration) bool {
 	client := http.Client{Timeout: timeout}
 
 	count := int32(0)
 	ch := make(chan bool, len(peers))
-	for _, peer := range peers {
-		go func(baseurl string) {
-			r, e := client.Get(fmt.Sprintf("%s%s", baseurl, rafthttp.ProbingPrefix))
-			ch <- e == nil && r.StatusCode == http.StatusOK
+	for i, peer := range peers {
+		go func(pid uint64, baseurl string) {
+			if pid == id { // ignore self
+				ch <- false
+			} else {
+				r, e := client.Get(fmt.Sprintf("%s%s", baseurl, rafthttp.ProbingPrefix))
+				ch <- e == nil && r.StatusCode == http.StatusOK
+			}
 			if atomic.AddInt32(&count, 1) == int32(len(peers)) {
 				close(ch)
 			}
-		}(peer)
+		}(i, peer)
 	}
 
 	for active := range ch {
@@ -317,7 +321,7 @@ func (rc *raftNode) startRaft() {
 		rpeers[i] = raft.Peer{ID: uint64(i + 1)}
 	}
 	c := &raft.Config{
-		ID:                        uint64(rc.id),
+		ID:                        rc.id,
 		ElectionTick:              10,
 		HeartbeatTick:             1,
 		Storage:                   rc.raftStorage,
@@ -326,8 +330,7 @@ func (rc *raftNode) startRaft() {
 		MaxUncommittedEntriesSize: 1 << 30,
 		Logger:                    newRaftLogger(rc.logger),
 	}
-
-	if oldwal || len(rpeers) == 0 || anyActive(rc.peers, 500*time.Millisecond) { // if any peer active, then join
+	if oldwal || len(rpeers) == 0 || anyActive(rc.id, rc.peers, 500*time.Millisecond) { // if any peer active, then join
 		rc.node = raft.RestartNode(c)
 	} else {
 		rc.node = raft.StartNode(c, rpeers)
@@ -336,7 +339,7 @@ func (rc *raftNode) startRaft() {
 	rc.transport = &rafthttp.Transport{
 		Logger:      rc.logger,
 		ID:          types.ID(rc.id),
-		ClusterID:   0x1000,
+		ClusterID:   0x2023,
 		Raft:        rc,
 		ServerStats: stats.NewServerStats("", strconv.FormatUint(rc.id, 10)),
 		LeaderStats: stats.NewLeaderStats(rc.logger, strconv.FormatUint(rc.id, 10)),

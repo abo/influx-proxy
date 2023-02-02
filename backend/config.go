@@ -77,9 +77,7 @@ type ClusterConfig struct {
 func (cc *ClusterConfig) GetPeers() map[uint64]string {
 	results := make(map[uint64]string, len(cc.Peers))
 	for _, peer := range cc.Peers {
-		if peer.ID != cc.LocalID {
-			results[peer.ID] = peer.Url
-		}
+		results[peer.ID] = peer.Url
 	}
 	return results
 }

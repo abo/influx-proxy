@@ -95,6 +95,7 @@ func NewHttpService(cfg *backend.Config) (*HttpService, error) {
 	dataNodes := make([]*backend.Backend, 0, len(cfg.DataNodes))
 	for i, nodeCfg := range cfg.DataNodes {
 		dataNodes = append(dataNodes, backend.NewBackend(i, nodeCfg, cfg.Proxy))
+		svc.proposeDataNodeChanges(&DataNodeInfo{i, *nodeCfg})
 	}
 	svc.dataNodes = dataNodes
 
@@ -104,14 +105,15 @@ func NewHttpService(cfg *backend.Config) (*HttpService, error) {
 
 	// 5) initialize sharder
 	log.Infof("start sharder, %d measurement(s) sharded", len(cfg.Sharding))
-	svc.sharder = sharding.NewSharder(svc.dmgr, cfg.Sharding, func(changes []*sharding.ReplicaInfo) error {
+	proposeReplicas := func(changes []*sharding.ReplicaInfo) error {
 		if data, err := serialize(nil, changes); err != nil {
 			return err
 		} else {
 			svc.cluster.Propose(data)
 			return nil
 		}
-	})
+	}
+	svc.sharder = sharding.NewSharder(svc.dmgr, cfg.Sharding, proposeReplicas)
 	if replicas != nil {
 		log.Info("recover meta from snapshot")
 		svc.sharder.Init(len(dataNodes), 1)
@@ -119,6 +121,7 @@ func NewHttpService(cfg *backend.Config) (*HttpService, error) {
 	} else {
 		log.Infof("initialize meta with number-of-shards: %d, number-of-replicas: %d", len(dataNodes), 1)
 		svc.sharder.Init(len(dataNodes), 1) // TODO  by legacy config
+		proposeReplicas(svc.sharder.CurrentState())
 	}
 
 	// 6) initialize proxy
@@ -131,13 +134,13 @@ func NewHttpService(cfg *backend.Config) (*HttpService, error) {
 
 func (svc *HttpService) Handler() http.Handler {
 	r := mux.NewRouter()
-	// r.Use(func(next http.Handler) http.Handler {
-	// 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 		w.Header().Set("X-Influxdb-Version", backend.Version)
-	// 		w.Header().Add("X-Influxdb-Build", "Proxy")
-	// 		next.ServeHTTP(w, r)
-	// 	})
-	// })
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Influxdb-Version", backend.Version)
+			w.Header().Add("X-Influxdb-Build", "Proxy")
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// biz for influx query & write
 	r.HandleFunc("/ping", svc.HandlerPing)
