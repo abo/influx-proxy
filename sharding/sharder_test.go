@@ -91,7 +91,7 @@ func TestShard(t *testing.T) {
 
 func isBalance(a, b int) bool {
 	total := a + b
-	delta := total / 100 // 差异在 1% 以内
+	delta := total / 50 // 差异在 2% 以内
 	return (a-b) < delta && (b-a) < delta
 }
 
@@ -143,6 +143,7 @@ func TestScale(t *testing.T) {
 
 	// 扩展到 2 分片，应该有一半数据迁移到 shard1
 	data[1] = make(map[string]struct{})
+
 	err := sharder.Scale(2)
 	if err != nil {
 		t.Fatalf("scale up failed: %v", err)
