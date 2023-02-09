@@ -11,25 +11,35 @@ import (
 	"go.uber.org/multierr"
 )
 
+// 一个 measurement 的一个副本, 各副本有自己独立的分片数和状态, 这样多个副本可以轮换扩容
+type replica struct {
+	shards int32        // 该 replica 的分片数, 对于 unsharded measurement 为该 replica 的节点数
+	state  ReplicaState // 该 replica 的数据分布状态, 如是否均衡
+}
+
 // 对 measurement 的 replica 进行分片, 计算每条数据的分片位置, 以及触发对应的迁移/均衡
-// 对于不分片的 measurement, 当作分片数 1 处理,
+// 对于不分片的 measurement, 当作分片数 1 处理, 也就是只 replication 不 sharding
 type ReplicaSharder struct {
 	dmgr                    DataManager
 	defaultNumberOfReplicas int
 	defaultNumberOfShards   int
-	shardingTag             map[string]string
-	replicas                map[string][]*Replica
-	mu                      sync.RWMutex // mu protects meta & state
+	shardingTag             map[string]string                  // 各 measurement 的分片 tag 名
+	replicas                map[string][]*replica              // 各 measurement 的副本状态
+	mu                      sync.RWMutex                       // mu protects replicas
+	stateWatcher            func(changes []*ReplicaInfo) error // 发布 replica 状态变化, 当前仅仅同步状态, 不是强一致的, 应该改造为先 propose, 等待 commit 之后再 apply
 }
 
-func NewSharder(dmgr DataManager, cfg []*Config) *ReplicaSharder {
+func NewSharder(dmgr DataManager, cfg []*Config, watcher func(changes []*ReplicaInfo) error) *ReplicaSharder {
 	tags := make(map[string]string)
 	for _, measurement := range cfg {
 		tags[measurement.Name] = measurement.Tag
 	}
 
+	if watcher == nil {
+		watcher = func(changes []*ReplicaInfo) error { return nil }
+	}
 	rand.Seed(time.Now().Unix())
-	return &ReplicaSharder{dmgr: dmgr, shardingTag: tags, replicas: make(map[string][]*Replica)}
+	return &ReplicaSharder{dmgr: dmgr, shardingTag: tags, replicas: make(map[string][]*replica), stateWatcher: watcher}
 }
 
 // Init a sharded cluster's metadata
@@ -40,9 +50,9 @@ func (rs *ReplicaSharder) Init(numberOfNodes, defaultNumberOfReplicas int) {
 	rs.defaultNumberOfShards = numberOfNodes
 	rs.mu.Lock()
 	for _, measurement := range rs.dmgr.GetManagedMeasurements() {
-		rs.replicas[measurement] = make([]*Replica, defaultNumberOfReplicas)
-		for replica := 0; replica < defaultNumberOfReplicas; replica++ {
-			rs.replicas[measurement][replica] = &Replica{int32(numberOfNodes), balanced}
+		rs.replicas[measurement] = make([]*replica, defaultNumberOfReplicas)
+		for replicaIndex := 0; replicaIndex < defaultNumberOfReplicas; replicaIndex++ {
+			rs.replicas[measurement][replicaIndex] = &replica{int32(numberOfNodes), Balanced}
 		}
 	}
 	rs.mu.Unlock()
@@ -61,14 +71,18 @@ func (rs *ReplicaSharder) getNumberOfReplicas(measurement string) int {
 
 	// 在 managed measurement 使用通配符, 并且 Init 时 db 中没有数据, 后续写入时会找不到元信息, 因此需要延迟初始化
 	if !prs && rs.dmgr.IsManagedMeasurement(measurement) {
-		replicas = make([]*Replica, rs.defaultNumberOfReplicas)
+		replicas = make([]*replica, rs.defaultNumberOfReplicas)
+		changes := make([]*ReplicaInfo, rs.defaultNumberOfReplicas)
 		for i := 0; i < len(replicas); i++ {
-			replicas[i] = &Replica{int32(rs.defaultNumberOfShards), balanced}
+			replicas[i] = &replica{int32(rs.defaultNumberOfShards), Balanced}
+			changes[i] = &ReplicaInfo{measurement, i, replicas[i].shards, replicas[i].state}
 		}
 
 		rs.mu.Lock()
 		rs.replicas[measurement] = replicas
 		rs.mu.Unlock()
+
+		rs.stateWatcher(changes)
 	}
 	return len(replicas)
 }
@@ -96,9 +110,12 @@ func (rs *ReplicaSharder) Scale(numberOfShards int) error {
 				if rs.getNumberOfShards(m, replica) == int32(numberOfShards) {
 					continue
 				}
+
 				rs.mu.Lock()
 				rs.replicas[m][replica].shards = int32(numberOfShards)
 				rs.mu.Unlock()
+
+				rs.stateWatcher([]*ReplicaInfo{{m, replica, int32(numberOfShards), Rebalancing}})
 				err = multierr.Append(err, rs.Rebalance(m, replica))
 			}
 		}(measurement)
@@ -135,23 +152,34 @@ func (rs *ReplicaSharder) Replicate(numberOfReplicas int) error {
 // 删除多余的 replica, 仅保留 numberOfReplicas 个
 func (rs *ReplicaSharder) shrinkReplica(measurement string, numberOfReplicas int) error {
 	log.Infof("shrink %s to %d replica(s)", measurement, numberOfReplicas)
+
+	changes := make([]*ReplicaInfo, 0, len(rs.replicas[measurement])-numberOfReplicas)
+	for i := len(rs.replicas[measurement]); i > numberOfReplicas; i-- {
+		changes = append(changes, &ReplicaInfo{measurement, i - 1, 0, Balanced})
+	}
+
 	// 删除元数据并清理原始数据
 	rs.mu.Lock()
 	rs.replicas[measurement] = rs.replicas[measurement][:numberOfReplicas]
 	rs.mu.Unlock()
 
+	rs.stateWatcher(changes)
 	return rs.Cleanup(measurement)
 }
 
 // 增加更多 replica
 func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int) error {
 	log.Infof("expand %s to %d replica(s)", measurement, numberOfReplicas)
+	changes := make([]*ReplicaInfo, 0, numberOfReplicas-len(rs.replicas[measurement]))
 	rs.mu.Lock()
 	originReplicas := len(rs.replicas[measurement])
 	for len(rs.replicas[measurement]) < numberOfReplicas {
-		rs.replicas[measurement] = append(rs.replicas[measurement], &Replica{int32(rs.defaultNumberOfShards), rebalancing})
+		replica := &replica{int32(rs.defaultNumberOfShards), Rebalancing}
+		rs.replicas[measurement] = append(rs.replicas[measurement], replica)
+		changes = append(changes, &ReplicaInfo{measurement, len(rs.replicas[measurement]) - 1, replica.shards, replica.state})
 	}
 	rs.mu.Unlock()
+	rs.stateWatcher(changes)
 
 	var err error
 
@@ -174,9 +202,14 @@ func (rs *ReplicaSharder) expandReplica(measurement string, numberOfReplicas int
 
 	rs.mu.Lock()
 	for replica := originReplicas; replica < numberOfReplicas; replica++ {
-		rs.replicas[measurement][replica].state = balanced
+		rs.replicas[measurement][replica].state = Balanced
 	}
 	rs.mu.Unlock()
+
+	for _, replica := range changes {
+		replica.State = Balanced
+	}
+	rs.stateWatcher(changes)
 	return err
 }
 
@@ -271,12 +304,14 @@ func (rs *ReplicaSharder) RebalanceForAll() error {
 
 func (rs *ReplicaSharder) Rebalance(measurement string, replica int) error {
 	rs.mu.Lock()
-	if rs.replicas[measurement][replica].state == rebalancing {
+	if rs.replicas[measurement][replica].state == Rebalancing {
 		rs.mu.Unlock()
 		return fmt.Errorf("sharder: measurement(%s) 's replica(%d) is rebalancing", measurement, replica)
 	}
-	rs.replicas[measurement][replica].state = rebalancing
+	rs.replicas[measurement][replica].state = Rebalancing
+	changes := []*ReplicaInfo{{measurement, replica, rs.replicas[measurement][replica].shards, Rebalancing}}
 	rs.mu.Unlock()
+	rs.stateWatcher(changes)
 
 	_, sharded := rs.GetShardingTag(measurement)
 	numberOfShards := rs.getNumberOfShards(measurement, replica)
@@ -318,8 +353,10 @@ func (rs *ReplicaSharder) Rebalance(measurement string, replica int) error {
 	log.Infof("rebalance done, measurement: %s, replica: %d, err: %v", measurement, replica, err)
 
 	rs.mu.Lock()
-	rs.replicas[measurement][replica].state = balanced
+	rs.replicas[measurement][replica].state = Balanced
 	rs.mu.Unlock()
+	changes[0].State = Balanced
+	rs.stateWatcher(changes)
 	return err
 }
 
@@ -392,11 +429,10 @@ func (rs *ReplicaSharder) isDirty(measurement string, shard int32, shardingTagVa
 func (rs *ReplicaSharder) isRebalancing(measurement string, replica int) bool {
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
-	return rs.replicas[measurement][replica].state == rebalancing
+	return rs.replicas[measurement][replica].state == Rebalancing
 }
 
 // 获取指定 shardingTag 数据的所有分片位置, 并按是否在 rebalancing 排序, 调用者可以优先查询稳定的分片
-// TODO preferred
 func (rs *ReplicaSharder) GetAllocatedShards(measurement string, shardingTagValue string) []int {
 	replicas := rand.Perm(rs.getNumberOfReplicas(measurement)) // replica 的顺序随机, 从而达到负载均衡读
 	sort.Slice(replicas, func(i, j int) bool {
@@ -410,4 +446,53 @@ func (rs *ReplicaSharder) GetAllocatedShards(measurement string, shardingTagValu
 		shards[i] = int(jumpHashForReplica(str2key(shardingTagValue), replica, rs.getNumberOfShards(measurement, replica))[replica])
 	}
 	return shards
+}
+
+func (rs *ReplicaSharder) ApplyReplicaChanges(changes []*ReplicaInfo) error {
+	var err error
+	for _, change := range changes {
+		measurement := change.Measurement
+		replicaIndex := change.Index
+		rs.mu.Lock()
+		switch {
+		case replicaIndex == len(rs.replicas[measurement]) && change.Shards > 0: // append when expand replica
+			r := &replica{change.Shards, change.State}
+			if rs.replicas[measurement] == nil {
+				rs.replicas[measurement] = []*replica{r}
+			} else {
+				rs.replicas[measurement] = append(rs.replicas[measurement], r)
+			}
+			if rs.defaultNumberOfReplicas <= len(rs.replicas[measurement]) {
+				// 表示正在执行 replicate 增加副本, 需要调整 defaultNumberOfReplicas 保持一致
+				rs.defaultNumberOfReplicas = len(rs.replicas[measurement])
+			}
+		case replicaIndex == len(rs.replicas[measurement])-1 && change.Shards <= 0: // delete when shrink replica
+			rs.replicas[measurement] = rs.replicas[measurement][:replicaIndex]
+			if rs.defaultNumberOfReplicas > len(rs.replicas[measurement]) {
+				// 表示正在执行 replicate 缩写副本, 需要调整 defaultNumberOfReplicas 保持一致
+				rs.defaultNumberOfReplicas = len(rs.replicas[measurement])
+			}
+		case replicaIndex < len(rs.replicas[measurement]) && change.Shards > 0: // update when rebalance
+			if rs.replicas[measurement][replicaIndex].shards != change.Shards && rs.defaultNumberOfShards != int(change.Shards) { // 缩容或扩容时
+				rs.defaultNumberOfShards = int(change.Shards)
+			}
+			rs.replicas[measurement][replicaIndex].shards = change.Shards
+			rs.replicas[measurement][replicaIndex].state = change.State
+		default: // error
+			log.Warnf("illegal sharder state change ignored: %v, current state: %v", change, rs.replicas[measurement])
+			err = multierr.Append(err, fmt.Errorf("can not apply change %v", change))
+		}
+		rs.mu.Unlock()
+	}
+	return err
+}
+
+func (rs *ReplicaSharder) CurrentState() []*ReplicaInfo {
+	state := make([]*ReplicaInfo, 0, len(rs.replicas)*rs.defaultNumberOfReplicas)
+	for measurement, replicas := range rs.replicas {
+		for i, r := range replicas {
+			state = append(state, &ReplicaInfo{measurement, i, r.shards, r.state})
+		}
+	}
+	return state
 }

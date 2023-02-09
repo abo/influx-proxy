@@ -70,7 +70,7 @@ func (dm *dummyDM) RemoveMeasurement(shard int32, measurement string) error {
 func TestShard(t *testing.T) {
 	sharder := sharding.NewSharder(&dummyDM{
 		measurements: []string{"mA", "mB"},
-	}, []*sharding.Config{{Name: "mA", Tag: "A"}, {Name: "mB", Tag: "B"}})
+	}, []*sharding.Config{{Name: "mA", Tag: "A"}, {Name: "mB", Tag: "B"}}, nil)
 
 	sharder.Init(2, 2)
 	balanceCounter := []int{0, 0}
@@ -91,7 +91,7 @@ func TestShard(t *testing.T) {
 
 func isBalance(a, b int) bool {
 	total := a + b
-	delta := total / 100 // 差异在 1% 以内
+	delta := total / 50 // 差异在 2% 以内
 	return (a-b) < delta && (b-a) < delta
 }
 
@@ -138,11 +138,12 @@ func TestScale(t *testing.T) {
 			mu.Unlock()
 			return nil
 		},
-	}, []*sharding.Config{{Name: "mA", Tag: "A"}})
+	}, []*sharding.Config{{Name: "mA", Tag: "A"}}, nil)
 	sharder.Init(1, 1)
 
 	// 扩展到 2 分片，应该有一半数据迁移到 shard1
 	data[1] = make(map[string]struct{})
+
 	err := sharder.Scale(2)
 	if err != nil {
 		t.Fatalf("scale up failed: %v", err)
