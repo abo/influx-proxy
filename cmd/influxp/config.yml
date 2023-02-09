@@ -36,10 +36,10 @@ data-nodes: # 初次启动时使用的 influxdb 节点, 后续运行时动态增
     password: ""
 
 logging:
-    level: "DEBUG" #logs at or above this threshold go to stderr, DEBUG/INFO/WARN/ERROR
-    file: "" # "/var/log/influxp.log" #If non-empty, use this log file, otherwise log to console
+    level: "INFO" #logs at or above this threshold go to stderr, DEBUG/INFO/WARN/ERROR
+    file: "/var/log/influxp.log" #If non-empty, use this log file, otherwise log to console
     file-max-size: 128 #Defines the maximum size a log file can grow to. Unit is megabytes. If the value is 0, the maximum file size is unlimited.
     file-max-age: 15 #Defines the maximum number of days to retain old log files. if empty, old log files is never deleting.
-    write-tracing: true
-    query-tracing: true
+    # write-tracing: true
+    # query-tracing: true
 

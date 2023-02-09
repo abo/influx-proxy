@@ -21,9 +21,9 @@ unit_tests:
 compile:
   stage: build
   script:
-    - GOARCH=amd64 GOOS=darwin go build $BUILD_OPTS -ldflags="-X backend.Version=$VERSION -X backend.GitCommit=$CI_COMMIT_SHORT_SHA" -o $CI_PROJECT_DIR/influxp-darwin-amd64-$CI_COMMIT_SHORT_SHA ./cmd/influxp/
-    - GOARCH=amd64 GOOS=linux go build $BUILD_OPTS -ldflags="-X backend.Version=$VERSION -X backend.GitCommit=$CI_COMMIT_SHORT_SHA" -o $CI_PROJECT_DIR/influxp-linux-amd64-$CI_COMMIT_SHORT_SHA ./cmd/influxp/
-    - GOARCH=arm64 GOOS=linux go build $BUILD_OPTS -ldflags="-X backend.Version=$VERSION -X backend.GitCommit=$CI_COMMIT_SHORT_SHA" -o $CI_PROJECT_DIR/influxp-linux-arm64-$CI_COMMIT_SHORT_SHA ./cmd/influxp/
+    - GOARCH=amd64 GOOS=darwin go build $BUILD_OPTS -ldflags="-X main.Version=$VERSION -X main.Commit=$CI_COMMIT_SHORT_SHA" -o $CI_PROJECT_DIR/influxp-darwin-amd64-$CI_COMMIT_SHORT_SHA ./cmd/influxp/
+    - GOARCH=amd64 GOOS=linux go build $BUILD_OPTS -ldflags="-X main.Version=$VERSION -X main.Commit=$CI_COMMIT_SHORT_SHA" -o $CI_PROJECT_DIR/influxp-linux-amd64-$CI_COMMIT_SHORT_SHA ./cmd/influxp/
+    - GOARCH=arm64 GOOS=linux go build $BUILD_OPTS -ldflags="-X main.Version=$VERSION -X main.Commit=$CI_COMMIT_SHORT_SHA" -o $CI_PROJECT_DIR/influxp-linux-arm64-$CI_COMMIT_SHORT_SHA ./cmd/influxp/
     - mkdir etc && cp ./cmd/influxp/*.yml etc/ && cp -r ./cmd/influxp/init.d etc/
   artifacts:
     name: "influxproxy-V$VERSION-$CI_COMMIT_SHORT_SHA"

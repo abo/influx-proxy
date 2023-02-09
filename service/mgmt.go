@@ -40,7 +40,7 @@ func (svc *HttpService) HandlerHealth(w http.ResponseWriter, req *http.Request) 
 		"status":  "ok",
 		"checks":  []string{},
 		"nodes":   health,
-		"version": backend.Version,
+		// "version": backend.Version,
 	}
 	svc.Write(w, req, http.StatusOK, resp)
 }

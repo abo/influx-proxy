@@ -14,12 +14,6 @@ import (
 )
 
 var (
-	Version   = "not build"
-	GitCommit = "not build"
-	BuildTime = "not build"
-)
-
-var (
 	ErrEmptyMeasurements = errors.New("measurements cannot be empty")
 	ErrEmptyBackendUrl   = errors.New("node url cannot be empty")
 	ErrDuplicatedBackend = errors.New("node url duplicated")

@@ -21,6 +21,12 @@ import (
 )
 
 var (
+	Version   = "dev"
+	Commit    = "dev"
+	BuildTime = "none"
+)
+
+var (
 	configFile string
 	version    bool
 )
@@ -34,9 +40,9 @@ func init() {
 }
 
 func printVersion() {
-	fmt.Printf("Version:    %s\n", backend.Version)
-	fmt.Printf("Git commit: %s\n", backend.GitCommit)
-	fmt.Printf("Build time: %s\n", backend.BuildTime)
+	fmt.Printf("Version:    %s\n", Version)
+	fmt.Printf("Git commit: %s\n", Commit)
+	fmt.Printf("Build time: %s\n", BuildTime)
 	fmt.Printf("Go version: %s\n", runtime.Version())
 	fmt.Printf("OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
 }
@@ -52,7 +58,7 @@ func main() {
 		fmt.Printf("illegal config file: %v\n", err)
 		return
 	}
-	log.Infof("version: %s, commit: %s, build: %s", backend.Version, backend.GitCommit, backend.BuildTime)
+	log.Infof("version: %s, commit: %s, build: %s", Version, Commit, BuildTime)
 	cfg.PrintSummary()
 	log.Init(cfg.Logging)
 	defer log.Flush()
@@ -63,8 +69,14 @@ func main() {
 		return
 	}
 	server := &http.Server{
-		Addr:        cfg.Proxy.ListenAddr,
-		Handler:     svc.Handler(),
+		Addr: cfg.Proxy.ListenAddr,
+		Handler: svc.Handler(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Influxdb-Version", Version)
+				w.Header().Add("X-Influxdb-Build", "Proxy")
+				next.ServeHTTP(w, r)
+			})
+		}),
 		IdleTimeout: time.Duration(cfg.Proxy.IdleTimeout) * time.Second,
 	}
 

@@ -132,15 +132,11 @@ func NewHttpService(cfg *backend.Config) (*HttpService, error) {
 	return svc, nil
 }
 
-func (svc *HttpService) Handler() http.Handler {
+func (svc *HttpService) Handler(intercept func(next http.Handler) http.Handler) http.Handler {
 	r := mux.NewRouter()
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Influxdb-Version", backend.Version)
-			w.Header().Add("X-Influxdb-Build", "Proxy")
-			next.ServeHTTP(w, r)
-		})
-	})
+	if intercept != nil {
+		r.Use(intercept)
+	}
 
 	// biz for influx query & write
 	r.HandleFunc("/ping", svc.HandlerPing)
