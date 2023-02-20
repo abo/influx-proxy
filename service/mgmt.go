@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/abo/influx-proxy/backend"
 	"github.com/abo/influx-proxy/log"
 	"github.com/abo/influx-proxy/util"
+	"go.uber.org/multierr"
 )
 
 type DataNodeInfo struct {
@@ -85,16 +87,36 @@ func (svc *HttpService) HandlerScale(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// TODO scale in
-	url := req.FormValue("url")
-	user := req.FormValue("username")
-	pwd := req.FormValue("password")
 
-	nodeCfg := &backend.BackendConfig{Url: url, Username: user, Password: pwd}
-	svc.cfg.DataNodes = append(svc.cfg.DataNodes, nodeCfg)
-	svc.dataNodes = append(svc.dataNodes, backend.NewBackend(len(svc.dataNodes), nodeCfg, svc.cfg.Proxy))
-	svc.dmgr.SetDataNodes(svc.dataNodes)
-	svc.proxy.SetDataNodes(svc.dataNodes)
-	err := svc.proposeDataNodeChanges(&DataNodeInfo{len(svc.dataNodes) - 1, *nodeCfg})
+	sep := ","
+	addrs := strings.Split(req.FormValue("url"), sep)
+	for _, addr := range addrs {
+		if _, err := url.Parse(addr); err != nil || addr == "" {
+			svc.WriteError(w, req, http.StatusBadRequest, "illegal url")
+			return
+		}
+	}
+	users := strings.Split(req.FormValue("username"), sep)
+	pwds := strings.Split(req.FormValue("password"), sep)
+	var err error
+	for i, addr := range addrs {
+		user, pwd := "", ""
+		if len(users) > i {
+			user = users[i]
+		}
+		if len(pwds) > i {
+			pwd = pwds[i]
+		}
+
+		nodeCfg := &backend.BackendConfig{Url: addr, Username: user, Password: pwd}
+		svc.cfg.DataNodes = append(svc.cfg.DataNodes, nodeCfg)
+		svc.dataNodes = append(svc.dataNodes, backend.NewBackend(len(svc.dataNodes), nodeCfg, svc.cfg.Proxy))
+		svc.dmgr.SetDataNodes(svc.dataNodes)
+		svc.proxy.SetDataNodes(svc.dataNodes)
+		err = multierr.Append(err, svc.proposeDataNodeChanges(&DataNodeInfo{len(svc.dataNodes) - 1, *nodeCfg}))
+	}
+
+	log.Infof("scale out with %v", addrs)
 	go svc.sharder.Scale(len(svc.dataNodes))
 
 	if err != nil {
