@@ -328,7 +328,7 @@ func (rs *ReplicaSharder) Rebalance(measurement string, replica int) error {
 			if sharded { // 对于已分片的, 检查并移动 series
 				shardErr = rs.scanSeries(measurement, shard, func(measurement string, shard int32, shardingTag string, tagValue string) error {
 					destShard := jumpHashForReplica(str2key(tagValue), replica, numberOfShards)
-					log.Debugf("move series %s.%s from %d to %v", measurement, tagValue, shard, destShard[replica:])
+					log.Debugf("[replica-%d] move series %s.%s from %d to %v", replica, measurement, tagValue, shard, destShard[replica:])
 					if e := rs.dmgr.CopySeries(measurement, shard, destShard[replica:], shardingTag, tagValue); e != nil {
 						return e
 					}
@@ -337,7 +337,7 @@ func (rs *ReplicaSharder) Rebalance(measurement string, replica int) error {
 			} else if rs.isDirty(measurement, shard, "") {
 				// 对于未分片的, 检查并移动 measurement
 				destShard := jumpHashForReplica(str2key(measurement), replica, numberOfShards)
-				log.Debugf("move measurement %s from %d to %v", measurement, shard, destShard[replica:])
+				log.Debugf("[replica-%d] move measurement %s from %d to %v", replica, measurement, shard, destShard[replica:])
 				shardErr = rs.dmgr.CopyMeasurement(shard, destShard[replica:], measurement)
 				if shardErr == nil {
 					shardErr = rs.dmgr.RemoveMeasurement(shard, measurement)
