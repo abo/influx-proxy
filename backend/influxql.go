@@ -279,31 +279,43 @@ func GetMeasurementFromTokens(tokens []string) (mm string, err error) {
 	return
 }
 
+// GetConditionFromTokens 解析查询条件中指定字段的值, 更稳定的实现应该是是 influxql parser, 但需要评估性能差异
 func GetConditionFromTokens(tokens []string, field string) (val string, err error) {
 	field = strings.ToLower(field)
-	return GetIdentifierFromTokens(tokens, []string{"where"}, func(conditions []string, where string) string {
+	val, err = GetIdentifierFromTokens(tokens, []string{"where"}, func(conditions []string, where string) string {
 		for i := 0; i < len(conditions); i++ {
 			start := strings.ToLower(unquote(conditions[i]))
+			if start[0] == '(' && start[len(start)-1] == ')' { // 对 where ("edge"='171) 这种兼容处理
+				start = start[1 : len(start)-1]
+			}
 
-			if !strings.HasPrefix(start, field) {
+			if strings.HasPrefix(start, field) {
+				start = start[len(field):] // 跳过字段名, 关注赋值部分
+			} else if strings.HasPrefix(start, "\""+field+"\"") {
+				start = start[len(field)+2:] // 跳过字段名, 关注赋值部分
+			} else {
 				continue
 			}
-			start = start[len(field):]
+			start = strings.TrimSpace(start)
 
 			if start == "" {
-				if conditions[i+1] == "=" {
+				if len(conditions) > i+2 && conditions[i+1] == "=" { // field = val
 					return unquote(conditions[i+2])
-				} else if conditions[i+1][0] == '=' {
+				} else if len(conditions) > i+1 && conditions[i+1][0] == '=' { // field =val
 					return unquote(conditions[i+1][1:])
 				}
-			} else if start == "=" {
+			} else if len(conditions) > i+1 && start == "=" { // field= val
 				return unquote(conditions[i+1])
-			} else if strings.HasPrefix(start, "=") {
-				return unquote(start[1:])
+			} else if strings.HasPrefix(start, "=") { // field=val
+				return unquote(strings.TrimSpace(start[1:]))
 			}
 		}
-		return ""
+		return "" // error not found
 	})
+	if val == "" && err == nil {
+		err = ErrIllegalQL
+	}
+	return val, err
 }
 
 func unquote(str string) string {
