@@ -6,6 +6,8 @@ package influxproxy
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -85,6 +87,21 @@ func (ip *Proxy) Query(w http.ResponseWriter, req *http.Request) (body []byte, e
 	q := strings.TrimSpace(req.FormValue("q"))
 	if q == "" {
 		return nil, backend.ErrEmptyQuery
+	}
+
+	if rawParams := req.FormValue("params"); rawParams != "" && strings.Contains(q, "$") {
+		var params map[string]interface{}
+		decoder := json.NewDecoder(strings.NewReader(rawParams))
+		decoder.UseNumber()
+		if err = decoder.Decode(&params); err != nil {
+			return nil, errors.New("error parsing query parameters: " + err.Error())
+		}
+		replaces := make([]string, 0)
+		for k, v := range params {
+			replaces = append(replaces, fmt.Sprintf("$%s", k), fmt.Sprintf("'%v'", v))
+
+		}
+		q = strings.NewReplacer(replaces...).Replace(q)
 	}
 
 	tokens, check, from := backend.CheckQuery(q)
