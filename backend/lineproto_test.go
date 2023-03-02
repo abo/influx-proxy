@@ -76,17 +76,28 @@ func TestScanTagValue(t *testing.T) {
 	}{{[]byte("cpu2,host=server04,region=us-west,direction=out running=false,status=\"fail\" 1596819659"), "region", "us-west"},
 		{[]byte("cpu2,host=server04,region=us-west,direction=out running=false,status=\"fail\" 1596819659"), "host", "server04"},
 		{[]byte("cpu4 idle=39,system=56i,user=\"Jay Chou\",brief\\ desc=\"the best \\\"singer\\\"\" 1422568543702"), "system", "56i"},
+		{[]byte("pop_link,ifname=eth0,pop=21,type=wan rx_Bps=692i,rx_byte=1761148359i,rx_pkt=13664440i,rx_pps=8i,tx_Bps=1340i,tx_byte=2414738142i,tx_pkt=16068538i,tx_pps=9i 1677753993071000000"), "pop", "21"},
+		{[]byte("pop_link,ifname=eth0,ipop=121,pop=21,type=wan rx_Bps=692i,rx_byte=1761148359i,rx_pkt=13664440i,rx_pps=8i,tx_Bps=1340i,tx_byte=2414738142i,tx_pkt=16068538i,tx_pps=9i 1677753993071000000"), "pop", "21"},
 	}
 	for _, tt := range tests {
 		val, err := ScanTagValue(tt.line, tt.tag)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if val != val {
+		if val != tt.want {
 			t.Fatal(val)
 		}
 	}
 
+}
+
+func BenchmarkScanTagValue(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		val, err := ScanTagValue([]byte("pop_link,ifname=eth0,pop=21,type=wan rx_Bps=692i,rx_byte=1761148359i,rx_pkt=13664440i,rx_pps=8i,tx_Bps=1340i,tx_byte=2414738142i,tx_pkt=16068538i,tx_pps=9i 1677753993071000000"), "pop")
+		if err != nil || val != "21" {
+			b.FailNow()
+		}
+	}
 }
 
 func BenchmarkScanKey(b *testing.B) {

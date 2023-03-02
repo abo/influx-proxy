@@ -113,6 +113,7 @@ func NewHttpService(cfg *backend.Config) (*HttpService, error) {
 			return nil
 		}
 	}
+
 	svc.sharder = sharding.NewSharder(svc.dmgr, cfg.Sharding, proposeReplicas)
 	if replicas != nil {
 		log.Info("recover meta from snapshot")
@@ -294,10 +295,6 @@ func (svc *HttpService) HandlerWriteV2(w http.ResponseWriter, req *http.Request)
 		svc.WriteError(w, req, http.StatusNotFound, err.Error())
 		return
 	}
-	// if svc.ip.IsForbiddenDB(db) {
-	// 	svc.WriteError(w, req, http.StatusBadRequest, fmt.Sprintf("database forbidden: %s", db))
-	// 	return
-	// }
 
 	svc.writeInternal(db, rp, precision, w, req)
 }
@@ -320,9 +317,12 @@ func (svc *HttpService) writeInternal(db, rp, precision string, w http.ResponseW
 	}
 
 	err = svc.proxy.Write(p, db, rp, precision)
-	if err == nil {
-		w.WriteHeader(http.StatusNoContent)
+	if err != nil {
+		log.Errorf("write line protocol err: %v, db: %s, rp: %s, precision: %s, data: %s, client: %s", err, db, rp, precision, p, req.RemoteAddr)
+		svc.WriteError(w, req, http.StatusInternalServerError, err.Error())
+		return
 	}
+	w.WriteHeader(http.StatusNoContent)
 	log.Debugf("write line protocol, db: %s, rp: %s, precision: %s, data: %s, client: %s", db, rp, precision, p, req.RemoteAddr)
 }
 

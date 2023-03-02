@@ -208,7 +208,7 @@ func (ip *Proxy) WriteRow(line []byte, db, rp, precision string) {
 		return parseTagValueFromLine(tagName, nanoLine)
 	})
 	if err != nil || len(backends) == 0 {
-		log.Warnf("write data error: can't get backends, db: %s, meas: %s", db, measurement)
+		log.Warnf("write row error: can't get backends, db: %s, meas: %s, err: %v", db, measurement, err)
 		return
 	}
 
