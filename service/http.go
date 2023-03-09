@@ -164,6 +164,7 @@ func (svc *HttpService) Handler(intercept func(next http.Handler) http.Handler) 
 	// debug for profile
 	r.HandleFunc("/debug/pprof/{name}", func(resp http.ResponseWriter, req *http.Request) {
 		name := mux.Vars(req)["name"]
+		fmt.Println("name", name)
 		pprof.Handler(name).ServeHTTP(resp, req)
 	})
 

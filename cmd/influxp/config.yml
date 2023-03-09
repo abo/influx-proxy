@@ -6,7 +6,7 @@ proxy:
   password: "" # 认证密码, 在访问管理接口及查询/写入接口时需要认证
   data-dir: "influxpdata" # 数据存储目录, 包括元数据与 buffer, 确保有权限读写
   measurements: # 纳管的 Measurement 范围
-    - cpe.*
+    - stress.*
   # flush-size: 10000 # 高级配置
   # flush-time: 1
   # flush-pool-size: 20
@@ -16,10 +16,24 @@ proxy:
   # idle-timeout: 10 
 
 sharding: # 各 Measurement 的分片 Tag
-  - name: "cpe.cpe_lw_conn_rttploss"
-    tag: "customer"
-  - name: "cpe.cpe_lw_conn_rxtx"
-    tag: "customer"
+  - name: "stress.m1"
+    tag: "tag0"
+  - name: "stress.m2"
+    tag: "tag1"
+  - name: "stress.m3"
+    tag: "tag2"
+  - name: "stress.m4"
+    tag: "tag0"
+  - name: "stress.m5"
+    tag: "tag1"
+  - name: "stress.m6"
+    tag: "tag2"
+  - name: "stress.m7"
+    tag: "tag0"
+  - name: "stress.m8"
+    tag: "tag1"
+  - name: "stress.m9"
+    tag: "tag2"
 
 cluster: # 集群配置
   local-id: 1
@@ -37,7 +51,7 @@ data-nodes: # 初次启动时使用的 influxdb 节点, 后续运行时动态增
 
 logging:
     level: "INFO" #logs at or above this threshold go to stderr, DEBUG/INFO/WARN/ERROR
-    file: "/var/log/influxp.log" #If non-empty, use this log file, otherwise log to console
+    file: "/tmp/influxp.log" #If non-empty, use this log file, otherwise log to console
     file-max-size: 128 #Defines the maximum size a log file can grow to. Unit is megabytes. If the value is 0, the maximum file size is unlimited.
     file-max-age: 15 #Defines the maximum number of days to retain old log files. if empty, old log files is never deleting.
     # write-tracing: true
